@@ -72,12 +72,30 @@ non-empty result should fail the build. A new table without a policy is a defect
 ## Verification
 
 ```bash
-pnpm typecheck && pnpm test && pnpm build
+# unit tests — no database needed
+pnpm --filter @prodx/core --filter @prodx/api test
+
+# integration tests — prove RLS, immutability and gapless numbering
+brew services start postgresql@16
+packages/db/scripts/setup-test-db.sh
+pnpm --filter @prodx/db test
+
+pnpm typecheck && pnpm build
 ```
 
-Phase 0 status: 19 unit tests covering the numbering, fiscal-period and valuation engines;
-all six packages build and typecheck. Integration tests against a real Postgres — which is the
-only way to test RLS and transaction semantics meaningfully — arrive with Phase 1.
+Phase 0 status: **44 tests passing.** 24 unit tests (numbering, fiscal periods, valuation,
+tenant fail-closed) and 20 integration tests against a real PostgreSQL 16, which prove:
+
+- a connection that never set a tenant sees **zero rows**, not the whole table
+- one tenant cannot read, update or delete another tenant's row **even knowing its exact id**
+- an insert carrying another tenant's id is rejected by the policy's `WITH CHECK`
+- every one of the 23 tenant-scoped tables carries an enabled, forced policy
+- the stock ledger, genealogy, journal and audit tables reject `UPDATE` and `DELETE`
+  **even for the owning role**
+- 25 concurrent allocations produce distinct, contiguous document numbers, and a rolled-back
+  transaction returns its number rather than burning it
+
+The integration suite deliberately **fails** rather than skipping when no database is present.
 
 ## Build order
 

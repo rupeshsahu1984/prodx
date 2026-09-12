@@ -27,9 +27,9 @@ model Tenant {
   id        String   @id @default(uuid(7)) @db.Uuid
   code      String   @unique
   name      String
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   legalEntities LegalEntity[]
   users         AppUser[]
@@ -39,17 +39,17 @@ model Tenant {
 
 model LegalEntity {
   id       String @id @default(uuid(7)) @db.Uuid
-  tenantId String @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
   code     String
   name     String
 
   /// GSTIN is per legal entity per state, not per tenant.
-  taxRegistrationNo String?
-  baseCurrency      String  @default("INR") @db.Char(3)
-  isActive          Boolean @default(true)
+  taxRegistrationNo String?@map("tax_registration_no")
+  baseCurrency      String  @default("INR") @db.Char(3) @map("base_currency")
+  isActive          Boolean @default(true) @map("is_active")
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   plants       Plant[]
@@ -65,16 +65,16 @@ model LegalEntity {
 
 model Plant {
   id            String  @id @default(uuid(7)) @db.Uuid
-  tenantId      String  @db.Uuid
-  legalEntityId String  @db.Uuid
+  tenantId      String  @db.Uuid @map("tenant_id")
+  legalEntityId String  @db.Uuid @map("legal_entity_id")
   code          String
   name          String
   /// Rejecting negative stock keeps weighted-average valuation meaningful (ADR 0005).
-  allowNegativeStock Boolean @default(false)
-  isActive      Boolean @default(true)
+  allowNegativeStock Boolean @default(false) @map("allow_negative_stock")
+  isActive      Boolean @default(true) @map("is_active")
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   legalEntity LegalEntity          @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
   warehouses  Warehouse[]
@@ -88,14 +88,14 @@ model Plant {
 
 model Warehouse {
   id       String  @id @default(uuid(7)) @db.Uuid
-  tenantId String  @db.Uuid
-  plantId  String  @db.Uuid
+  tenantId String  @db.Uuid @map("tenant_id")
+  plantId  String  @db.Uuid @map("plant_id")
   code     String
   name     String
-  isActive Boolean @default(true)
+  isActive Boolean @default(true) @map("is_active")
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   plant     Plant             @relation(fields: [plantId], references: [id], onDelete: Restrict)
   locations StorageLocation[]
@@ -107,17 +107,17 @@ model Warehouse {
 
 model StorageLocation {
   id          String  @id @default(uuid(7)) @db.Uuid
-  tenantId    String  @db.Uuid
-  warehouseId String  @db.Uuid
+  tenantId    String  @db.Uuid @map("tenant_id")
+  warehouseId String  @db.Uuid @map("warehouse_id")
   code        String
   name        String
   /// Stock physically at a subcontractor is still ours (gap 20). Modelled as a
   /// location type rather than a separate table, so it flows through one ledger.
-  isThirdParty Boolean @default(false)
-  isActive     Boolean @default(true)
+  isThirdParty Boolean @default(false) @map("is_third_party")
+  isActive     Boolean @default(true) @map("is_active")
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   warehouse Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   balances  StockBalance[]
@@ -130,14 +130,14 @@ model StorageLocation {
 
 model AppUser {
   id           String  @id @default(uuid(7)) @db.Uuid
-  tenantId     String  @db.Uuid
+  tenantId     String  @db.Uuid @map("tenant_id")
   email        String
-  displayName  String
-  passwordHash String
-  isActive     Boolean @default(true)
+  displayName  String@map("display_name")
+  passwordHash String@map("password_hash")
+  isActive     Boolean @default(true) @map("is_active")
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
@@ -150,15 +150,15 @@ model AppUser {
 
 model Uom {
   id       String @id @default(uuid(7)) @db.Uuid
-  tenantId String @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
   code     String
   name     String
   /// LENGTH, MASS, AREA, VOLUME, COUNT — conversions are only valid within a dimension,
   /// except item-specific ones, which is exactly why those are a separate table.
   dimension String
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   itemsBase      Item[]              @relation("ItemBaseUom")
   itemsSecondary Item[]              @relation("ItemSecondaryUom")
@@ -175,13 +175,13 @@ model Uom {
 /// material lives in ItemUomConversion.
 model UomConversion {
   id        String  @id @default(uuid(7)) @db.Uuid
-  tenantId  String  @db.Uuid
-  fromUomId String  @db.Uuid
-  toUomId   String  @db.Uuid
+  tenantId  String  @db.Uuid @map("tenant_id")
+  fromUomId String  @db.Uuid @map("from_uom_id")
+  toUomId   String  @db.Uuid @map("to_uom_id")
   factor    Decimal @db.Decimal(24, 12)
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   fromUom Uom @relation("UomConversionFrom", fields: [fromUomId], references: [id], onDelete: Restrict)
   toUom   Uom @relation("UomConversionTo", fields: [toUomId], references: [id], onDelete: Restrict)
@@ -192,26 +192,26 @@ model UomConversion {
 
 model Item {
   id       String @id @default(uuid(7)) @db.Uuid
-  tenantId String @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
   code     String
   name     String
 
   /// All stock is stored in this unit (ADR 0004).
-  baseUomId String @db.Uuid
+  baseUomId String @db.Uuid @map("base_uom_id")
 
   /// Dual-UoM items carry a second quantity on every movement and balance.
   /// A fabric roll is metres AND kilograms; both are recorded, neither is derived.
-  isDualUom      Boolean @default(false)
-  secondaryUomId String? @db.Uuid
+  isDualUom      Boolean @default(false) @map("is_dual_uom")
+  secondaryUomId String? @db.Uuid @map("secondary_uom_id")
 
   granularity StockGranularity @default(LOT)
 
   /// Characteristics (style, colour, size, GSM, width) rather than flat SKUs (gap 19).
   characteristics Json @default("{}")
 
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   baseUom      Uom                 @relation("ItemBaseUom", fields: [baseUomId], references: [id], onDelete: Restrict)
   secondaryUom Uom?                @relation("ItemSecondaryUom", fields: [secondaryUomId], references: [id], onDelete: Restrict)
@@ -229,14 +229,14 @@ model Item {
 /// cannot live in a global table (ADR 0004).
 model ItemUomConversion {
   id       String  @id @default(uuid(7)) @db.Uuid
-  tenantId String  @db.Uuid
-  itemId   String  @db.Uuid
-  uomId    String  @db.Uuid
+  tenantId String  @db.Uuid @map("tenant_id")
+  itemId   String  @db.Uuid @map("item_id")
+  uomId    String  @db.Uuid @map("uom_id")
   /// Quantity of baseUom represented by one of uomId.
   factor   Decimal @db.Decimal(24, 12)
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   item Item @relation(fields: [itemId], references: [id], onDelete: Restrict)
   uom  Uom  @relation(fields: [uomId], references: [id], onDelete: Restrict)
@@ -259,8 +259,8 @@ enum StockGranularity {
 /// shape — a nullable stock unit would put a branch in every inventory query forever.
 model StockUnit {
   id       String @id @default(uuid(7)) @db.Uuid
-  tenantId String @db.Uuid
-  itemId   String @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
+  itemId   String @db.Uuid @map("item_id")
   /// Lot code, roll number or batch number as the plant knows it.
   reference String
 
@@ -268,14 +268,14 @@ model StockUnit {
 
   /// Attributes allocation may constrain on. Shade band is what makes dye-lot
   /// continuity possible (gap 18) — generic ERPs cannot express this.
-  shadeBand String?
+  shadeBand String?@map("shade_band")
   grade     String?
 
   /// Measured, not computed. The weighbridge and the roll scale are the source.
-  secondaryQuantity Decimal? @db.Decimal(18, 6)
+  secondaryQuantity Decimal? @db.Decimal(18, 6) @map("secondary_quantity")
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   item      Item               @relation(fields: [itemId], references: [id], onDelete: Restrict)
   balances  StockBalance[]
@@ -296,16 +296,16 @@ model StockUnit {
 /// Append-only: a correction adds a reversing transformation, it never deletes an edge.
 model StockUnitLink {
   id                  String  @id @default(uuid(7)) @db.Uuid
-  tenantId            String  @db.Uuid
-  parentStockUnitId   String  @db.Uuid
-  childStockUnitId    String  @db.Uuid
+  tenantId            String  @db.Uuid @map("tenant_id")
+  parentStockUnitId   String  @db.Uuid @map("parent_stock_unit_id")
+  childStockUnitId    String  @db.Uuid @map("child_stock_unit_id")
   /// The document that caused the link — work order, grading, packing list — so the
   /// trace explains itself rather than being a bare edge.
-  transformationType  String
-  transformationId    String  @db.Uuid
-  quantityContributed Decimal @db.Decimal(18, 6)
+  transformationType  String@map("transformation_type")
+  transformationId    String  @db.Uuid @map("transformation_id")
+  quantityContributed Decimal @db.Decimal(18, 6) @map("quantity_contributed")
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
 
   parent StockUnit @relation("LinkParent", fields: [parentStockUnitId], references: [id], onDelete: Restrict)
   child  StockUnit @relation("LinkChild", fields: [childStockUnitId], references: [id], onDelete: Restrict)
@@ -324,31 +324,31 @@ enum LedgerDirection {
 /// Append-only. Balances are projections of this table and are never the source of truth.
 model StockLedgerEntry {
   id       String @id @default(uuid(7)) @db.Uuid
-  tenantId String @db.Uuid
-  plantId  String @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
+  plantId  String @db.Uuid @map("plant_id")
 
-  itemId            String @db.Uuid
-  stockUnitId       String @db.Uuid
-  storageLocationId String @db.Uuid
+  itemId            String @db.Uuid @map("item_id")
+  stockUnitId       String @db.Uuid @map("stock_unit_id")
+  storageLocationId String @db.Uuid @map("storage_location_id")
 
   direction LedgerDirection
 
   /// Always in the item's base UoM (ADR 0004).
   quantity Decimal @db.Decimal(18, 6)
   /// Dual-UoM items carry the second quantity here. Captured, not derived.
-  secondaryQuantity Decimal? @db.Decimal(18, 6)
+  secondaryQuantity Decimal? @db.Decimal(18, 6) @map("secondary_quantity")
 
   /// Moving weighted average at the time of the movement (ADR 0005).
-  unitCost   Decimal @db.Decimal(18, 6)
-  totalValue Decimal @db.Decimal(18, 2)
+  unitCost   Decimal @db.Decimal(18, 6) @map("unit_cost")
+  totalValue Decimal @db.Decimal(18, 2) @map("total_value")
 
   /// The business date the movement belongs to. Distinct from createdAt, and the
   /// value the fiscal period is resolved from (ADR 0007).
-  postingDate DateTime @db.Date
+  postingDate DateTime @db.Date @map("posting_date")
 
-  sourceType String
-  sourceId   String   @db.Uuid
-  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  sourceType String@map("source_type")
+  sourceId   String   @db.Uuid @map("source_id")
+  createdAt  DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
 
   plant           Plant           @relation(fields: [plantId], references: [id], onDelete: Restrict)
   item            Item            @relation(fields: [itemId], references: [id], onDelete: Restrict)
@@ -364,16 +364,16 @@ model StockLedgerEntry {
 /// Projection of the ledger, maintained in the same transaction as the ledger insert.
 model StockBalance {
   id                String @id @default(uuid(7)) @db.Uuid
-  tenantId          String @db.Uuid
-  stockUnitId       String @db.Uuid
-  storageLocationId String @db.Uuid
+  tenantId          String @db.Uuid @map("tenant_id")
+  stockUnitId       String @db.Uuid @map("stock_unit_id")
+  storageLocationId String @db.Uuid @map("storage_location_id")
 
   quantity          Decimal  @db.Decimal(18, 6)
-  secondaryQuantity Decimal? @db.Decimal(18, 6)
+  secondaryQuantity Decimal? @db.Decimal(18, 6) @map("secondary_quantity")
 
   /// Optimistic locking — two pickers must not both allocate the last roll.
   version   Int      @default(0)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   stockUnit       StockUnit       @relation(fields: [stockUnitId], references: [id], onDelete: Restrict)
   storageLocation StorageLocation @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
@@ -387,18 +387,18 @@ model StockBalance {
 /// transaction as the ledger insert, never recomputed from scratch at read time.
 model ItemPlantValuation {
   id       String @id @default(uuid(7)) @db.Uuid
-  tenantId String @db.Uuid
-  itemId   String @db.Uuid
-  plantId  String @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
+  itemId   String @db.Uuid @map("item_id")
+  plantId  String @db.Uuid @map("plant_id")
 
-  quantityOnHand Decimal @db.Decimal(18, 6)
-  totalValue     Decimal @db.Decimal(18, 2)
+  quantityOnHand Decimal @db.Decimal(18, 6) @map("quantity_on_hand")
+  totalValue     Decimal @db.Decimal(18, 2) @map("total_value")
   /// Derived: totalValue / quantityOnHand. Stored so the ledger can record the
   /// cost that actually applied at the moment of the movement.
-  unitCost       Decimal @db.Decimal(18, 6)
+  unitCost       Decimal @db.Decimal(18, 6) @map("unit_cost")
 
   version   Int      @default(0)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   item  Item  @relation(fields: [itemId], references: [id], onDelete: Restrict)
   plant Plant @relation(fields: [plantId], references: [id], onDelete: Restrict)
@@ -417,15 +417,15 @@ enum PeriodStatus {
 
 model FiscalYear {
   id            String   @id @default(uuid(7)) @db.Uuid
-  tenantId      String   @db.Uuid
-  legalEntityId String   @db.Uuid
+  tenantId      String   @db.Uuid @map("tenant_id")
+  legalEntityId String   @db.Uuid @map("legal_entity_id")
   /// Indian fiscal year label, e.g. "2026-27".
   code          String
-  startDate     DateTime @db.Date
-  endDate       DateTime @db.Date
+  startDate     DateTime @db.Date @map("start_date")
+  endDate       DateTime @db.Date @map("end_date")
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   legalEntity LegalEntity    @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
   periods     FiscalPeriod[]
@@ -436,15 +436,15 @@ model FiscalYear {
 
 model FiscalPeriod {
   id           String       @id @default(uuid(7)) @db.Uuid
-  tenantId     String       @db.Uuid
-  fiscalYearId String       @db.Uuid
+  tenantId     String       @db.Uuid @map("tenant_id")
+  fiscalYearId String       @db.Uuid @map("fiscal_year_id")
   sequence     Int
-  startDate    DateTime     @db.Date
-  endDate      DateTime     @db.Date
+  startDate    DateTime     @db.Date @map("start_date")
+  endDate      DateTime     @db.Date @map("end_date")
   status       PeriodStatus @default(OPEN)
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   fiscalYear FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
 
@@ -457,16 +457,16 @@ model FiscalPeriod {
 
 model GlAccount {
   id            String  @id @default(uuid(7)) @db.Uuid
-  tenantId      String  @db.Uuid
-  legalEntityId String  @db.Uuid
+  tenantId      String  @db.Uuid @map("tenant_id")
+  legalEntityId String  @db.Uuid @map("legal_entity_id")
   code          String
   name          String
   /// ASSET, LIABILITY, EQUITY, INCOME, EXPENSE
-  accountType   String
-  isPostable    Boolean @default(true)
+  accountType   String@map("account_type")
+  isPostable    Boolean @default(true) @map("is_postable")
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   legalEntity LegalEntity   @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
   lines       JournalLine[]
@@ -478,20 +478,20 @@ model GlAccount {
 /// Append-only. A posted entry is never edited — it is reversed and reposted.
 model JournalEntry {
   id            String @id @default(uuid(7)) @db.Uuid
-  tenantId      String @db.Uuid
-  legalEntityId String @db.Uuid
+  tenantId      String @db.Uuid @map("tenant_id")
+  legalEntityId String @db.Uuid @map("legal_entity_id")
 
-  documentNo  String
-  postingDate DateTime @db.Date
+  documentNo  String@map("document_no")
+  postingDate DateTime @db.Date @map("posting_date")
   narration   String?
 
-  sourceType String
-  sourceId   String @db.Uuid
+  sourceType String@map("source_type")
+  sourceId   String @db.Uuid @map("source_id")
 
   /// Set when this entry reverses another. Never both edited and reversed.
-  reversesJournalEntryId String? @db.Uuid
+  reversesJournalEntryId String? @db.Uuid @map("reverses_journal_entry_id")
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
 
   legalEntity LegalEntity   @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
   lines       JournalLine[]
@@ -504,16 +504,16 @@ model JournalEntry {
 
 model JournalLine {
   id             String  @id @default(uuid(7)) @db.Uuid
-  tenantId       String  @db.Uuid
-  journalEntryId String  @db.Uuid
-  glAccountId    String  @db.Uuid
-  lineNo         Int
+  tenantId       String  @db.Uuid @map("tenant_id")
+  journalEntryId String  @db.Uuid @map("journal_entry_id")
+  glAccountId    String  @db.Uuid @map("gl_account_id")
+  lineNo         Int@map("line_no")
   debit          Decimal @default(0) @db.Decimal(18, 2)
   credit         Decimal @default(0) @db.Decimal(18, 2)
   /// Cost centre, plant, project — reporting dimensions kept out of the account code.
   dimensions     Json    @default("{}")
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
 
   journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
   glAccount    GlAccount    @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
@@ -529,16 +529,16 @@ model JournalLine {
 /// document's own transaction, so a rollback returns the number.
 model NumberSeries {
   id            String @id @default(uuid(7)) @db.Uuid
-  tenantId      String @db.Uuid
-  legalEntityId String @db.Uuid
-  seriesCode    String
-  fiscalYear    String
+  tenantId      String @db.Uuid @map("tenant_id")
+  legalEntityId String @db.Uuid @map("legal_entity_id")
+  seriesCode    String@map("series_code")
+  fiscalYear    String@map("fiscal_year")
   /// Placeholders: {FY}, {####}. Resolved after the number is allocated.
   format        String
-  nextValue     Int    @default(1)
+  nextValue     Int    @default(1) @map("next_value")
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
   legalEntity LegalEntity @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
 
@@ -549,17 +549,17 @@ model NumberSeries {
 /// Append-only: who changed what, when, why and from which source.
 model AuditEvent {
   id         String   @id @default(uuid(7)) @db.Uuid
-  tenantId   String   @db.Uuid
-  actorId    String?  @db.Uuid
-  entityType String
-  entityId   String   @db.Uuid
+  tenantId   String   @db.Uuid @map("tenant_id")
+  actorId    String?  @db.Uuid @map("actor_id")
+  entityType String@map("entity_type")
+  entityId   String   @db.Uuid @map("entity_id")
   action     String
   /// Only the changed fields, before and after. Never the whole row — payroll and
   /// bank details must not be duplicated into the audit log.
   changes    Json     @default("{}")
   reason     String?
   source     String
-  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
 
   @@index([tenantId, entityType, entityId, createdAt])
   @@index([tenantId, actorId, createdAt])
@@ -577,15 +577,15 @@ enum OutboxStatus {
 /// transaction; the intent is committed here and a worker delivers it.
 model OutboxMessage {
   id          String       @id @default(uuid(7)) @db.Uuid
-  tenantId    String       @db.Uuid
+  tenantId    String       @db.Uuid @map("tenant_id")
   topic       String
   payload     Json
   status      OutboxStatus @default(PENDING)
   attempts    Int          @default(0)
-  lastError   String?
-  availableAt DateTime     @default(now()) @db.Timestamptz(6)
-  createdAt   DateTime     @default(now()) @db.Timestamptz(6)
-  sentAt      DateTime?    @db.Timestamptz(6)
+  lastError   String?@map("last_error")
+  availableAt DateTime     @default(now()) @db.Timestamptz(6) @map("available_at")
+  createdAt   DateTime     @default(now()) @db.Timestamptz(6) @map("created_at")
+  sentAt      DateTime?    @db.Timestamptz(6) @map("sent_at")
 
   @@index([status, availableAt])
   @@index([tenantId, topic, createdAt])
@@ -596,12 +596,12 @@ model OutboxMessage {
 /// The stored response is replayed rather than the operation being repeated.
 model IdempotencyKey {
   id          String   @id @default(uuid(7)) @db.Uuid
-  tenantId    String   @db.Uuid
+  tenantId    String   @db.Uuid @map("tenant_id")
   source      String
-  externalRef String
-  requestHash String
+  externalRef String@map("external_ref")
+  requestHash String@map("request_hash")
   response    Json?
-  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
 
   @@unique([tenantId, source, externalRef])
   @@index([tenantId, createdAt])

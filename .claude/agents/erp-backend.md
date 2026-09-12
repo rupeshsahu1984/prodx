@@ -43,8 +43,16 @@ and the prototype's intent in `prototype/schemas.js` for the module you are buil
 
 ## Testing
 
-Unit-test engines without a database. Integration-test services against a real Postgres
-(Testcontainers) — RLS behaviour and transaction semantics cannot be mocked meaningfully.
-Every posting path needs a test proving the reversal restores balances exactly.
+Unit-test engines without a database — they take repositories as arguments precisely so this
+is possible in milliseconds.
+
+Integration-test everything else against a **real Postgres**: RLS behaviour, transaction
+semantics and lock-based guarantees cannot be mocked meaningfully. The suite runs against a
+local `prodx_test` database prepared by `packages/db/scripts/setup-test-db.sh`, as the
+non-owner `prodx_app` role — testing as the owner would prove nothing about RLS.
+
+Every posting path needs a test proving the reversal restores balances exactly. Never let an
+integration suite pass by skipping when the database is absent: a security test that silently
+does not run is worse than no test, because it reports success.
 
 Run typecheck, lint and tests before reporting completion. If something fails, say so.

@@ -25,6 +25,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO prodx_app
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO prodx_app;
 
+-- NULLIF on the empty string matters: an unset GUC yields NULL and the
+-- comparison filters every row, but an empty string would raise a cast error
+-- instead. Both fail closed, yet NULL gives a clean empty result rather than a
+-- 500 the moment some caller sets the header to ''.
+--
 -- Apply the tenant policy to every table that has a tenant_id column.
 -- Generated rather than hand-listed, so a new table cannot be forgotten.
 DO $$
@@ -46,8 +51,8 @@ BEGIN
     EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON public.%I', t);
     EXECUTE format(
       'CREATE POLICY tenant_isolation ON public.%I
-         USING (tenant_id = current_setting(''app.tenant_id'', true)::uuid)
-         WITH CHECK (tenant_id = current_setting(''app.tenant_id'', true)::uuid)', t);
+         USING (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''')::uuid)
+         WITH CHECK (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''')::uuid)', t);
   END LOOP;
 END
 $$;
