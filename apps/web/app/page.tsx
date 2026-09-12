@@ -1,50 +1,270 @@
-const ENGINES = [
-  { name: 'Numbering', state: 'implemented', note: 'Gapless, locking UPDATE in the caller transaction' },
-  { name: 'Fiscal period guard', state: 'implemented', note: 'No bypass path exists' },
-  { name: 'Costing', state: 'implemented', note: 'Moving weighted average, zero-residue on cycle to empty' },
-  { name: 'Outbox', state: 'implemented', note: 'SKIP LOCKED claim, backoff, dead-letter' },
-  { name: 'Stock ledger', state: 'schema only', note: 'Append-only, trigger-enforced' },
-  { name: 'GL posting', state: 'schema only', note: 'Reversal-only' },
-  { name: 'Document', state: 'not started', note: 'Phase 1' },
-  { name: 'Workflow & approval', state: 'not started', note: 'Phase 1' },
-  { name: 'UoM', state: 'schema only', note: 'Dual quantity captured, never derived' },
-  { name: 'Audit', state: 'schema only', note: 'Changed fields only' },
-]
+'use client'
 
-const COLOR: Record<string, string> = {
-  implemented: '#0b6f70',
-  'schema only': '#7d5c0d',
-  'not started': '#66797f',
+import { useCallback, useEffect, useState } from 'react'
+
+const API = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3001'
+
+interface Me { userId: string; email: string; displayName: string; permissions: string[] }
+interface Line { id: string; lineNo: number; quantity: string; receivedQuantity: string; rate: string; amount: string; item: { code: string; name: string } }
+interface PO { id: string; documentNo: string; state: string; totalAmount: string; supplier: { name: string }; plant: { code: string }; lines: Line[] }
+interface GRN { id: string; documentNo: string; state: string; postingDate: string; purchaseOrder: { documentNo: string }; lines: { id: string; quantity: string; amount: string; item: { code: string } }[] }
+interface Stock {
+  balances: { id: string; quantity: string; stockUnit: { reference: string; item: { code: string; name: string } }; storageLocation: { code: string } }[]
+  valuations: { id: string; quantityOnHand: string; totalValue: string; unitCost: string; item: { code: string; name: string } }[]
 }
+interface JournalLine { id: string; debit: string; credit: string; glAccount: { code: string; name: string } }
+interface Journal { id: string; documentNo: string; narration: string | null; sourceType: string; lines: JournalLine[] }
+
+const money = (v: string) => `₹ ${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+const qty = (v: string) => Number(v).toLocaleString('en-IN')
 
 export default function Page() {
+  const [token, setToken] = useState<string | null>(null)
+  const [me, setMe] = useState<Me | null>(null)
+  const [pos, setPos] = useState<PO[]>([])
+  const [grns, setGrns] = useState<GRN[]>([])
+  const [stock, setStock] = useState<Stock | null>(null)
+  const [journal, setJournal] = useState<Journal[]>([])
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    try { setToken(sessionStorage.getItem('prodx.token')) } catch { /* private mode */ }
+  }, [])
+
+  const call = useCallback(
+    async (path: string, init?: RequestInit): Promise<unknown> => {
+      const res = await fetch(`${API}${path}`, {
+        ...init,
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token ?? ''}`, ...init?.headers },
+      })
+      const body: unknown = res.status === 204 ? null : await res.json().catch(() => null)
+      if (!res.ok) {
+        const message = (body as { message?: string } | null)?.message
+        throw new Error(typeof message === 'string' ? message : `Request failed (${res.status})`)
+      }
+      return body
+    },
+    [token],
+  )
+
+  const load = useCallback(async () => {
+    if (token === null) return
+    try {
+      const [meRes, poRes, grnRes, stockRes, jRes] = await Promise.all([
+        call('/me'), call('/purchase-orders'), call('/goods-receipts'), call('/stock/balances'), call('/journal'),
+      ])
+      setMe(meRes as Me); setPos(poRes as PO[]); setGrns(grnRes as GRN[])
+      setStock(stockRes as Stock); setJournal(jRes as Journal[]); setError('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      if (String(e).includes('401') || String(e).includes('valid')) signOut()
+    }
+  }, [token, call])
+
+  useEffect(() => { void load() }, [load])
+
+  function signOut() {
+    try { sessionStorage.removeItem('prodx.token') } catch { /* ignore */ }
+    setToken(null); setMe(null)
+  }
+
+  async function act(fn: () => Promise<unknown>, message: string) {
+    setBusy(true); setError(''); setNotice('')
+    try { await fn(); setNotice(message); await load() }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
+  if (token === null) return <Login onToken={(t) => { try { sessionStorage.setItem('prodx.token', t) } catch { /* ignore */ } setToken(t) }} />
+
+  const posted = grns.filter((g) => g.state === 'POSTED').length
+  const stockValue = stock?.valuations.reduce((s, v) => s + Number(v.totalValue), 0) ?? 0
+
   return (
-    <main style={{ maxWidth: 760, margin: '0 auto', padding: '48px 20px' }}>
-      <p style={{ fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: '#0b6f70', margin: 0 }}>
-        Phase 0 · Foundation
-      </p>
-      <h1 style={{ fontSize: 34, margin: '10px 0 6px', color: '#101f2c' }}>PRODX Manufacturing ERP</h1>
-      <p style={{ color: '#3a4d58', margin: '0 0 32px' }}>
-        Engines before modules. 151 modules map onto 13 behaviour families, so the
-        build is shared engines with the modules configured on top.
-      </p>
-      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 8 }}>
-        {ENGINES.map((engine) => (
-          <li
-            key={engine.name}
-            style={{
-              background: '#fff', border: '1px solid #d3dddf', borderLeft: `4px solid ${COLOR[engine.state]}`,
-              padding: '12px 16px', display: 'grid', gridTemplateColumns: '1fr auto', gap: 4,
-            }}
-          >
-            <strong style={{ color: '#101f2c' }}>{engine.name}</strong>
-            <span style={{ fontSize: 11, color: COLOR[engine.state], textTransform: 'uppercase', letterSpacing: '.08em' }}>
-              {engine.state}
-            </span>
-            <span style={{ gridColumn: '1 / -1', fontSize: 13, color: '#66797f' }}>{engine.note}</span>
-          </li>
-        ))}
-      </ul>
-    </main>
+    <div className="shell">
+      <aside className="side">
+        <div className="brand">
+          <span className="mark">P</span>
+          <div><strong>PRODX</strong><small>Manufacturing ERP</small></div>
+        </div>
+        {me !== null && (
+          <div className="who">
+            <b>{me.displayName}</b>
+            <small>{me.email}</small>
+            <div className="perm">{me.permissions.map((p) => <span key={p}>{p}</span>)}</div>
+          </div>
+        )}
+        <button className="btn" onClick={signOut} style={{ marginTop: 'auto' }}>Sign out</button>
+      </aside>
+
+      <main className="main">
+        <h1>Procure to Receive</h1>
+        <p className="sub">Live data from PostgreSQL through the API, scoped by row level security.</p>
+
+        {error !== '' && <div className="err">{error}</div>}
+        {notice !== '' && <div className="ok">{notice}</div>}
+
+        <div className="kpis">
+          <div className="kpi"><small>Purchase orders</small><b>{pos.length}</b></div>
+          <div className="kpi"><small>Receipts posted</small><b>{posted}</b></div>
+          <div className="kpi"><small>Stock value</small><b style={{ fontSize: 19 }}>{money(String(stockValue))}</b></div>
+          <div className="kpi"><small>Journal entries</small><b>{journal.length}</b></div>
+        </div>
+
+        <section className="panel">
+          <div className="phead"><div><h2>Purchase orders</h2><small>Receive creates a draft for everything still outstanding</small></div></div>
+          {pos.length === 0 ? <div className="empty">No purchase orders.</div> : (
+            <table>
+              <thead><tr><th>Document</th><th>Supplier</th><th>Item</th><th className="num">Ordered</th><th className="num">Received</th><th className="num">Amount</th><th>State</th><th></th></tr></thead>
+              <tbody>
+                {pos.map((po) => po.lines.map((line, i) => (
+                  <tr key={line.id}>
+                    {i === 0 && <td rowSpan={po.lines.length} className="code">{po.documentNo}</td>}
+                    {i === 0 && <td rowSpan={po.lines.length}>{po.supplier.name}</td>}
+                    <td><b>{line.item.code}</b><br /><small style={{ color: 'var(--muted)' }}>{line.item.name}</small></td>
+                    <td className="num">{qty(line.quantity)}</td>
+                    <td className="num">{qty(line.receivedQuantity)}</td>
+                    <td className="num">{money(line.amount)}</td>
+                    {i === 0 && <td rowSpan={po.lines.length}><span className={`chip ${po.state}`}>{po.state}</span></td>}
+                    {i === 0 && (
+                      <td rowSpan={po.lines.length}>
+                        <button className="btn primary" disabled={busy}
+                          onClick={() => act(() => call(`/purchase-orders/${po.id}/receive`, { method: 'POST', body: '{}' }), 'Draft receipt created.')}>
+                          Receive
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                )))}
+              </tbody>
+            </table>
+          )}
+        </section>
+
+        <section className="panel">
+          <div className="phead"><div><h2>Goods receipts</h2><small>Posting moves stock, revalues the item and writes the journal — in one transaction</small></div></div>
+          {grns.length === 0 ? <div className="empty">No receipts yet. Use Receive above.</div> : (
+            <table>
+              <thead><tr><th>Document</th><th>Against</th><th>Posting date</th><th className="num">Lines</th><th className="num">Value</th><th>State</th><th></th></tr></thead>
+              <tbody>
+                {grns.map((g) => (
+                  <tr key={g.id}>
+                    <td className="code">{g.documentNo === '' ? '—' : g.documentNo}</td>
+                    <td>{g.purchaseOrder.documentNo}</td>
+                    <td>{g.postingDate.slice(0, 10)}</td>
+                    <td className="num">{g.lines.length}</td>
+                    <td className="num">{money(String(g.lines.reduce((s, l) => s + Number(l.amount), 0)))}</td>
+                    <td><span className={`chip ${g.state}`}>{g.state}</span></td>
+                    <td>
+                      {g.state === 'DRAFT' && (
+                        <button className="btn primary" disabled={busy}
+                          onClick={() => act(() => call(`/goods-receipts/${g.id}/post`, { method: 'POST' }), 'Receipt posted.')}>Post</button>
+                      )}
+                      {g.state === 'POSTED' && (
+                        <button className="btn" disabled={busy}
+                          onClick={() => act(() => call(`/goods-receipts/${g.id}/reverse`, { method: 'POST' }), 'Receipt reversed — balances restored.')}>Reverse</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+
+        <section className="panel">
+          <div className="phead"><div><h2>Stock &amp; valuation</h2><small>Moving weighted average, maintained in the same transaction as the ledger</small></div></div>
+          {(stock?.valuations.length ?? 0) === 0 ? <div className="empty">No stock yet. Post a receipt.</div> : (
+            <table>
+              <thead><tr><th>Item</th><th className="num">On hand</th><th className="num">Unit cost</th><th className="num">Total value</th></tr></thead>
+              <tbody>
+                {stock?.valuations.map((v) => (
+                  <tr key={v.id}>
+                    <td><b>{v.item.code}</b><br /><small style={{ color: 'var(--muted)' }}>{v.item.name}</small></td>
+                    <td className="num">{qty(v.quantityOnHand)}</td>
+                    <td className="num">{money(v.unitCost)}</td>
+                    <td className="num">{money(v.totalValue)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+
+        <section className="panel">
+          <div className="phead"><div><h2>Journal</h2><small>Append-only. A correction is a reversal, never an edit.</small></div></div>
+          {journal.length === 0 ? <div className="empty">Nothing posted yet.</div> : (
+            <table>
+              <thead><tr><th>Document</th><th>Account</th><th className="num">Debit</th><th className="num">Credit</th><th>Source</th></tr></thead>
+              <tbody>
+                {journal.map((j) => j.lines.map((l, i) => (
+                  <tr key={l.id}>
+                    {i === 0 && <td rowSpan={j.lines.length} className="code">{j.documentNo}</td>}
+                    <td>{l.glAccount.code}<br /><small style={{ color: 'var(--muted)' }}>{l.glAccount.name}</small></td>
+                    <td className="num">{Number(l.debit) === 0 ? '—' : money(l.debit)}</td>
+                    <td className="num">{Number(l.credit) === 0 ? '—' : money(l.credit)}</td>
+                    {i === 0 && <td rowSpan={j.lines.length}><small>{j.sourceType}</small></td>}
+                  </tr>
+                )))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      </main>
+    </div>
+  )
+}
+
+function Login({ onToken }: { onToken: (token: string) => void }) {
+  const [tenantCode, setTenantCode] = useState('DEMO')
+  const [email, setEmail] = useState('manager@prodx.demo')
+  const [password, setPassword] = useState('prodx-demo-2026')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy(true); setError('')
+    try {
+      const res = await fetch(`${API}/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tenantCode, email, password }),
+      })
+      const body: unknown = await res.json().catch(() => null)
+      if (!res.ok) throw new Error((body as { message?: string } | null)?.message ?? 'Sign in failed')
+      onToken((body as { accessToken: string }).accessToken)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="login">
+      <form className="card" onSubmit={submit}>
+        <div className="brand" style={{ marginBottom: 18 }}>
+          <span className="mark">P</span>
+          <div><strong>PRODX</strong><small>Manufacturing ERP</small></div>
+        </div>
+        <h1>Sign in</h1>
+        {error !== '' && <div className="err" style={{ marginTop: 14 }}>{error}</div>}
+        <label htmlFor="tenant">Tenant code</label>
+        <input id="tenant" value={tenantCode} onChange={(e) => setTenantCode(e.target.value)} />
+        <label htmlFor="email">Email</label>
+        <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <label htmlFor="password">Password</label>
+        <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <button className="btn primary" style={{ width: '100%', marginTop: 18, padding: 10 }} disabled={busy}>
+          {busy ? 'Signing in…' : 'Sign in'}
+        </button>
+        <div className="hint">
+          Demo users — password <code>prodx-demo-2026</code>
+          <br /><code>manager@prodx.demo</code> — full procurement rights
+          <br /><code>buyer@prodx.demo</code> — cannot reverse a posted receipt
+        </div>
+      </form>
+    </div>
   )
 }

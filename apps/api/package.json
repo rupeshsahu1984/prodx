@@ -7,7 +7,8 @@
     "dev": "nest start --watch",
     "start": "node dist/main",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed:demo": "node dist/seed-demo.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

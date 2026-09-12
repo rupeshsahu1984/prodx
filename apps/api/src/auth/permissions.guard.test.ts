@@ -3,7 +3,12 @@ import { Reflector } from '@nestjs/core'
 import type { ExecutionContext } from '@nestjs/common'
 import { describe, expect, it } from 'vitest'
 import { runWithContext } from '../tenancy/tenant-context'
-import { IS_PUBLIC_KEY, PERMISSION_KEY, PermissionsGuard } from './permissions.guard'
+import {
+  ANY_AUTHENTICATED_KEY,
+  IS_PUBLIC_KEY,
+  PERMISSION_KEY,
+  PermissionsGuard,
+} from './permissions.guard'
 
 /** Minimal ExecutionContext — the guard only ever asks for handler and class. */
 const ctx = (): ExecutionContext =>
@@ -47,6 +52,18 @@ describe('PermissionsGuard', () => {
     expect(() => withPerms(['purchase_order:read'], () => guard.canActivate(ctx()))).toThrow(
       ForbiddenException,
     )
+  })
+
+  it('lets an authenticated caller through without a specific permission', () => {
+    // A route that only returns the caller's own context must not have to ask
+    // for `*` — granting that to read a profile would grant everything else too.
+    const guard = guardWith({ [ANY_AUTHENTICATED_KEY]: true })
+    expect(withPerms([], () => guard.canActivate(ctx()))).toBe(true)
+  })
+
+  it('still requires a token for an any-authenticated route', () => {
+    const guard = guardWith({ [ANY_AUTHENTICATED_KEY]: true })
+    expect(() => guard.canActivate(ctx())).toThrow(/No request context/)
   })
 
   it('throws rather than defaulting when there is no request context', () => {

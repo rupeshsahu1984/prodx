@@ -23,7 +23,19 @@ export const RequirePermission = (permission: string) => SetMetadata(PERMISSION_
  * are genuinely open use @Public().
  */
 export const IS_PUBLIC_KEY = 'prodx:public'
+/** No token needed at all: login, refresh, health. */
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true)
+
+export const ANY_AUTHENTICATED_KEY = 'prodx:any-authenticated'
+/**
+ * A valid token is enough; no specific permission applies. For routes that only
+ * ever return the caller's own context, such as /me.
+ *
+ * This exists so such routes never have to ask for the `*` permission. Granting
+ * a user `*` to let them read their own profile would hand them every other
+ * permission in the system too.
+ */
+export const AnyAuthenticated = () => SetMetadata(ANY_AUTHENTICATED_KEY, true)
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -34,11 +46,18 @@ export class PermissionsGuard implements CanActivate {
 
     if (this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, targets) === true) return true
 
+    if (this.reflector.getAllAndOverride<boolean>(ANY_AUTHENTICATED_KEY, targets) === true) {
+      // Still requires a context, so an unauthenticated call throws here.
+      currentContext()
+      return true
+    }
+
     const required = this.reflector.getAllAndOverride<string>(PERMISSION_KEY, targets)
     if (required === undefined) {
       throw new ForbiddenException({
         code: 'PERMISSION_NOT_DECLARED',
-        message: 'This route declares no permission. Add @RequirePermission or @Public.',
+        message:
+          'This route declares no permission. Add @RequirePermission, @AnyAuthenticated or @Public.',
       })
     }
 

@@ -5,10 +5,11 @@ import { AuthMiddleware } from './auth/auth.middleware'
 import { AuthModule } from './auth/auth.module'
 import { PermissionsGuard } from './auth/permissions.guard'
 import { HealthController } from './health/health.controller'
+import { OperationsModule } from './operations/operations.module'
 import { PrismaService } from './prisma/prisma.service'
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, OperationsModule],
   controllers: [HealthController],
   providers: [PrismaService, { provide: APP_GUARD, useClass: PermissionsGuard }],
   exports: [PrismaService],

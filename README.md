@@ -43,8 +43,24 @@ psql "$DATABASE_MIGRATION_URL" -v app_password="$PRODX_APP_PASSWORD" \
      -f packages/db/scripts/create-app-role.sql
 psql "$DATABASE_MIGRATION_URL" -f packages/db/scripts/rls.sql
 
+# demo tenant you can sign into
+pnpm --filter @prodx/api build && pnpm --filter @prodx/api seed:demo
+
 pnpm dev                      # api :3001, web :3000
 ```
+
+Then open **http://localhost:3000** and sign in:
+
+| | |
+|---|---|
+| Tenant code | `DEMO` |
+| Manager | `manager@prodx.demo` — full procurement rights |
+| Buyer | `buyer@prodx.demo` — cannot reverse a posted receipt |
+| Password | `prodx-demo-2026` |
+
+**Receive** on the purchase order creates a draft for everything outstanding; **Post** moves
+stock, revalues the items and writes the journal in one transaction; **Reverse** puts all of
+it back. Sign in as the buyer to watch the same Reverse button return 403 from the backend.
 
 ### Authentication and authorization
 
