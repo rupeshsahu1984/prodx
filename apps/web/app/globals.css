@@ -77,3 +77,11 @@ input:focus,select:focus{outline:2px solid var(--teal);outline-offset:-1px;borde
   padding:5px 0;font-size:11.5px;color:#c3d4d9}
 .nrow b{font-family:ui-monospace,monospace;font-size:10px;color:#9fdede;flex:none}
 .nrow.dim{opacity:.35}
+
+.users{display:grid;gap:7px;margin-top:12px}
+.user{text-align:left;border:1px solid var(--line);background:#fff;border-radius:8px;
+  padding:9px 12px;cursor:pointer;display:block;width:100%}
+.user:hover{border-color:var(--teal);background:#f6fbfb}
+.user:disabled{opacity:.5;cursor:not-allowed}
+.user b{display:block;font-size:13px;color:var(--ink)}
+.user small{display:block;color:var(--muted);font-size:11.5px}

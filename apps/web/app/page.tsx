@@ -274,21 +274,27 @@ export default function Page() {
   )
 }
 
+const DEMO_USERS = [
+  { email: 'admin@prodx.demo', label: 'Superadmin', detail: 'Both factories' },
+  { email: 'carton.head@prodx.demo', label: 'Carton Plant Head', detail: 'Carton Plant only' },
+  { email: 'textile.head@prodx.demo', label: 'Textile Plant Head', detail: 'Textile Plant only' },
+  { email: 'carton.stores@prodx.demo', label: 'Store Executive', detail: 'Carton Plant · Stores' },
+] as const
+
 function Login({ onToken }: { onToken: (token: string) => void }) {
   const [tenantCode, setTenantCode] = useState('DEMO')
-  const [email, setEmail] = useState('manager@prodx.demo')
+  const [email, setEmail] = useState<string>(DEMO_USERS[0].email)
   const [password, setPassword] = useState('prodx-demo-2026')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault()
+  async function signIn(withEmail: string) {
     setBusy(true); setError('')
     try {
       const res = await fetch(`${API}/auth/login`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ tenantCode, email, password }),
+        body: JSON.stringify({ tenantCode, email: withEmail, password }),
       })
       const body: unknown = await res.json().catch(() => null)
       if (!res.ok) throw new Error((body as { message?: string } | null)?.message ?? 'Sign in failed')
@@ -300,13 +306,14 @@ function Login({ onToken }: { onToken: (token: string) => void }) {
 
   return (
     <div className="login">
-      <form className="card" onSubmit={submit}>
+      <form className="card" onSubmit={(e) => { e.preventDefault(); void signIn(email) }}>
         <div className="brand" style={{ marginBottom: 18 }}>
           <span className="mark">P</span>
           <div><strong>PRODX</strong><small>Manufacturing ERP</small></div>
         </div>
         <h1>Sign in</h1>
         {error !== '' && <div className="err" style={{ marginTop: 14 }}>{error}</div>}
+
         <label htmlFor="tenant">Tenant code</label>
         <input id="tenant" value={tenantCode} onChange={(e) => setTenantCode(e.target.value)} />
         <label htmlFor="email">Email</label>
@@ -316,10 +323,19 @@ function Login({ onToken }: { onToken: (token: string) => void }) {
         <button className="btn primary" style={{ width: '100%', marginTop: 18, padding: 10 }} disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
+
         <div className="hint">
-          Demo users — password <code>prodx-demo-2026</code>
-          <br /><code>manager@prodx.demo</code> — full procurement rights
-          <br /><code>buyer@prodx.demo</code> — cannot reverse a posted receipt
+          <b style={{ color: 'var(--ink)' }}>Demo users</b> — one click each. The two plant heads
+          hold the same role and see different data.
+          <div className="users">
+            {DEMO_USERS.map((u) => (
+              <button key={u.email} type="button" className="user" disabled={busy}
+                onClick={() => { setEmail(u.email); void signIn(u.email) }}>
+                <b>{u.label}</b>
+                <small>{u.detail}</small>
+              </button>
+            ))}
+          </div>
         </div>
       </form>
     </div>
