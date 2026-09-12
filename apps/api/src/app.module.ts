@@ -1,19 +1,25 @@
 import { Module, type MiddlewareConsumer, type NestModule } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
+import { APP_GUARD } from '@nestjs/core'
+import { AuthMiddleware } from './auth/auth.middleware'
+import { AuthModule } from './auth/auth.module'
+import { PermissionsGuard } from './auth/permissions.guard'
 import { HealthController } from './health/health.controller'
 import { PrismaService } from './prisma/prisma.service'
-import { TenantMiddleware } from './tenancy/tenant.middleware'
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true })],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule],
   controllers: [HealthController],
-  providers: [PrismaService],
+  providers: [PrismaService, { provide: APP_GUARD, useClass: PermissionsGuard }],
   exports: [PrismaService],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    // Every route except health. A route that skips this has no tenant context
-    // and will throw rather than read unscoped data.
-    consumer.apply(TenantMiddleware).exclude('health').forRoutes('*')
+    // Everything except health and the auth endpoints themselves, which cannot
+    // require a token to obtain one.
+    consumer
+      .apply(AuthMiddleware)
+      .exclude('health', 'auth/login', 'auth/refresh', 'auth/logout')
+      .forRoutes('*')
   }
 }

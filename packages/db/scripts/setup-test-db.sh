@@ -30,7 +30,15 @@ psql -U "$SUPERUSER" -d postgres -v ON_ERROR_STOP=1 -q \
 OWNER_URL="postgresql://prodx_owner:${PW}@localhost:5432/${DB}"
 
 echo "==> migrations"
-DATABASE_URL="$OWNER_URL" npx prisma migrate deploy --schema "$HERE/../prisma/schema.prisma"
+# The workspace's pinned prisma, not npx. npx resolves through the npm cache,
+# which makes this depend on network state and on the cache being writable —
+# neither of which a database setup script should care about.
+PRISMA="$HERE/../node_modules/.bin/prisma"
+if [ ! -x "$PRISMA" ]; then
+  echo "FAIL: $PRISMA not found. Run pnpm install first."
+  exit 1
+fi
+DATABASE_URL="$OWNER_URL" "$PRISMA" migrate deploy --schema "$HERE/../prisma/schema.prisma"
 
 echo "==> application role"
 # Created as the superuser, not as prodx_owner. Giving the schema owner

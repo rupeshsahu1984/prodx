@@ -46,15 +46,19 @@ psql "$DATABASE_MIGRATION_URL" -f packages/db/scripts/rls.sql
 pnpm dev                      # api :3001, web :3000
 ```
 
-### Phase 0 has no authentication
+### Authentication and authorization
 
-There is no login yet, so there is no trustworthy source for the tenant id. The API
-therefore **fails closed**: every tenant-scoped route returns 503 unless
-`PRODX_ALLOW_HEADER_TENANT=1` is set, and that flag is ignored in production — where the
-process refuses to start at all. The header stub exists to let the stack be exercised
-end to end, never to be deployed.
+The tenant is derived from a **signed JWT claim** — never a header, query parameter or body
+field, any of which a caller controls. `POST /auth/login` returns a 15-minute access token
+and a rotating refresh token; the refresh token is stored hashed and is revocable, and reuse
+of an already-rotated token revokes the whole family for that user, since reuse means it leaked.
 
-Phase 1 replaces it with a verified JWT whose signed claim carries the tenant.
+Authorization is a **globally applied guard that denies by default**. A route with no
+`@RequirePermission(...)` and no `@Public()` returns 403 rather than being open — a forgotten
+decorator becomes an obvious failure in development instead of a breach in production.
+
+Passwords use scrypt from Node's standard library (OWASP parameters, no native module), with
+account lockout after repeated failures.
 
 ### RLS is not optional
 
@@ -83,13 +87,13 @@ pnpm --filter @prodx/db test
 pnpm typecheck && pnpm build
 ```
 
-Phase 0 status: **44 tests passing.** 24 unit tests (numbering, fiscal periods, valuation,
-tenant fail-closed) and 20 integration tests against a real PostgreSQL 16, which prove:
+Phase 0 status: **73 tests passing.** 53 unit tests (numbering, fiscal periods, valuation,
+passwords, permissions, JWT, auth middleware, permission guard) and 20 integration tests against a real PostgreSQL 16, which prove:
 
 - a connection that never set a tenant sees **zero rows**, not the whole table
 - one tenant cannot read, update or delete another tenant's row **even knowing its exact id**
 - an insert carrying another tenant's id is rejected by the policy's `WITH CHECK`
-- every one of the 23 tenant-scoped tables carries an enabled, forced policy
+- every one of the 26 tenant-scoped tables carries an enabled, forced policy
 - the stock ledger, genealogy, journal and audit tables reject `UPDATE` and `DELETE`
   **even for the owning role**
 - 25 concurrent allocations produce distinct, contiguous document numbers, and a rolled-back

@@ -48,7 +48,10 @@ stop and lift it into an engine.
 5. **External calls never happen inside a database transaction.** Use the transactional
    outbox: commit the intent with the data, let a worker deliver it.
 6. **Authorization is enforced on the backend for every protected operation.** The frontend
-   hides things for usability, never for security.
+   hides things for usability, never for security. The permissions guard is global and denies
+   by default: every route declares `@RequirePermission(...)` or `@Public()`, and one that
+   declares neither returns 403. The tenant comes from a signed JWT claim, never from a
+   header, query parameter or body field.
 7. **Optimistic locking on every mutable business document** (`version` column). Two supervisors
    confirming the same work order must not double-issue stock.
 

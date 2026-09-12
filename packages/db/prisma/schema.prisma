@@ -139,11 +139,78 @@ model AppUser {
   createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
   updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  /// Brute-force protection. Cleared on a successful login.
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until") @db.Timestamptz(6)
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  roles         UserRole[]
+  refreshTokens RefreshToken[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
   @@map("app_user")
+}
+
+model Role {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
+  code     String
+  name     String
+
+  /// `domain:action` strings. `purchase_order:*` covers a domain, `*` everything.
+  /// Wildcards expand only at segment boundaries.
+  permissions String[]
+
+  /// Roles that may not be held together, enforced when roles are assigned
+  /// (gap 10). Whoever can create a supplier must not be able to approve its payment.
+  conflictsWith String[] @map("conflicts_with")
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users UserRole[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("role")
+}
+
+model UserRole {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  tenantId  String   @db.Uuid @map("tenant_id")
+  userId    String   @db.Uuid @map("user_id")
+  roleId    String   @db.Uuid @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user AppUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+  role Role    @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, userId, roleId])
+  @@index([tenantId, userId])
+  @@map("user_role")
+}
+
+/// Refresh tokens are stored HASHED. A database read must not yield a usable
+/// credential, and a token must be revocable — which a stateless JWT is not.
+model RefreshToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  tenantId  String    @db.Uuid @map("tenant_id")
+  userId    String    @db.Uuid @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  /// Set when this token was replaced. A reuse attempt after rotation means the
+  /// token leaked, and the whole family is revoked.
+  replacedById String? @map("replaced_by_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user AppUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, userId])
+  @@index([expiresAt])
+  @@map("refresh_token")
 }
 
 // ───────────────────────────── item & unit of measure (ADR 0004) ─────────────────────────────
