@@ -54,9 +54,15 @@ Then open **http://localhost:3000** and sign in:
 | | |
 |---|---|
 | Tenant code | `DEMO` |
-| Manager | `manager@prodx.demo` — full procurement rights |
-| Buyer | `buyer@prodx.demo` — cannot reverse a posted receipt |
+| `admin@prodx.demo` | Superadmin — both factories |
+| `carton.head@prodx.demo` | Carton Plant only |
+| `textile.head@prodx.demo` | Textile Plant only |
+| `carton.stores@prodx.demo` | Carton Plant, Stores department, fewer rights |
 | Password | `prodx-demo-2026` |
+
+The two plant heads hold the **same role** and see completely different data. Permissions
+decide which actions a user may take; **scope** decides which data they may touch, and scope
+is enforced by row level security rather than by a filter any developer could forget.
 
 **Receive** on the purchase order creates a draft for everything outstanding; **Post** moves
 stock, revalues the items and writes the journal in one transaction; **Reverse** puts all of
@@ -109,7 +115,9 @@ passwords, permissions, JWT, auth middleware, permission guard) and 20 integrati
 - a connection that never set a tenant sees **zero rows**, not the whole table
 - one tenant cannot read, update or delete another tenant's row **even knowing its exact id**
 - an insert carrying another tenant's id is rejected by the policy's `WITH CHECK`
-- every one of the 35 tenant-scoped tables carries an enabled, forced policy
+- every one of the 38 tenant-scoped tables carries an enabled, forced policy
+- a connection with no plant scope sees **no factory at all**, and one scoped to a single
+  factory cannot read or write another's data even by exact id
 - the stock ledger, genealogy, journal and audit tables reject `UPDATE` and `DELETE`
   **even for the owning role**
 - 25 concurrent allocations produce distinct, contiguous document numbers, and a rolled-back

@@ -62,3 +62,18 @@ input:focus,select:focus{outline:2px solid var(--teal);outline-offset:-1px;borde
 .kpi small{display:block;color:var(--muted);font-size:11px}
 .kpi b{display:block;font-size:23px;margin-top:5px;font-variant-numeric:tabular-nums}
 @media(max-width:820px){.shell{grid-template-columns:1fr}.side{flex-direction:row;flex-wrap:wrap;align-items:center}.main{padding:18px}}
+
+.side{overflow-y:auto}
+.sa{display:inline-block;margin-top:8px;font-size:9.5px;font-weight:700;letter-spacing:.05em;
+  text-transform:uppercase;background:rgba(255,210,120,.18);color:#ffd27a;padding:3px 7px;border-radius:3px}
+.scope h3{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#8aa4ad;margin:0 0 8px}
+.sitem{margin-bottom:7px}
+.sitem b{display:block;font-size:12px;font-family:ui-monospace,monospace;color:#9fdede}
+.sitem small{color:#8aa4ad;font-size:11px}
+.dchips{display:flex;flex-wrap:wrap;gap:4px}
+.dchips span{font-size:9.5px;background:rgba(255,255,255,.08);padding:2px 6px;border-radius:3px}
+.nav{border-top:1px solid rgba(255,255,255,.09);padding-top:12px}
+.nrow{display:flex;justify-content:space-between;align-items:center;gap:8px;
+  padding:5px 0;font-size:11.5px;color:#c3d4d9}
+.nrow b{font-family:ui-monospace,monospace;font-size:10px;color:#9fdede;flex:none}
+.nrow.dim{opacity:.35}

@@ -25,6 +25,12 @@ export const accessClaimsSchema = z.object({
   sub: z.string().uuid(),
   tid: z.string().uuid(),
   perms: z.array(z.string()),
+  /** Tenant superadmin: every factory, every department. */
+  sa: z.boolean(),
+  /** Factories this user may see. Ignored when `sa` is true. */
+  plants: z.array(z.string().uuid()),
+  /** Departments within those factories. Empty means every department of them. */
+  depts: z.array(z.string().uuid()),
 })
 export type AccessClaims = z.infer<typeof accessClaimsSchema>
 
@@ -34,4 +40,7 @@ export const meResponseSchema = z.object({
   email: z.string(),
   displayName: z.string(),
   permissions: z.array(z.string()),
+  isSuperAdmin: z.boolean(),
+  plants: z.array(z.object({ id: z.string(), code: z.string(), name: z.string() })),
+  departments: z.array(z.object({ id: z.string(), code: z.string(), name: z.string() })),
 })

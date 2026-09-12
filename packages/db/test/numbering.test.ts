@@ -26,6 +26,7 @@ describe('gapless document numbering', () => {
 
   beforeAll(async () => {
     owner = await connect(OWNER_URL)
+    await owner.query("SELECT set_config('app.plant_scope', '*', false)")
     await seedTwoTenants(owner)
     await setTenant(owner, TENANT_A)
     await owner.query(
@@ -52,6 +53,7 @@ describe('gapless document numbering', () => {
     const clients = await Promise.all(
       Array.from({ length: CONCURRENCY }, async () => {
         const c = await connect(OWNER_URL)
+        await c.query("SELECT set_config('app.plant_scope', '*', false)")
         await setTenant(c, TENANT_A)
         return c
       }),
@@ -72,8 +74,10 @@ describe('gapless document numbering', () => {
     const a = await connect(OWNER_URL)
     const b = await connect(OWNER_URL)
     try {
-      await setTenant(a, TENANT_A)
-      await setTenant(b, TENANT_A)
+      for (const c of [a, b]) {
+        await c.query("SELECT set_config('app.plant_scope', '*', false)")
+        await setTenant(c, TENANT_A)
+      }
       await a.query('BEGIN')
       const abandoned = await allocate(a)
       await a.query('ROLLBACK')

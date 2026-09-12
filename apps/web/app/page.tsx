@@ -4,7 +4,34 @@ import { useCallback, useEffect, useState } from 'react'
 
 const API = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3001'
 
-interface Me { userId: string; email: string; displayName: string; permissions: string[] }
+interface Scoped { id: string; code: string; name: string }
+interface Me {
+  userId: string; email: string; displayName: string; permissions: string[]
+  isSuperAdmin: boolean; plants: Scoped[]; departments: Scoped[]
+}
+
+/**
+ * The 15 domains of the prototype. `live` marks what is actually wired to the
+ * database today — the rest is the roadmap, shown rather than hidden so the
+ * shape of the product is visible from the first screen.
+ */
+const DOMAINS: { name: string; modules: number; live?: number; perm?: string }[] = [
+  { name: 'Home & Control Tower', modules: 4 },
+  { name: 'Enterprise & Master Data', modules: 8, live: 3 },
+  { name: 'CRM, Costing & Sales', modules: 8 },
+  { name: 'Planning & Scheduling', modules: 8 },
+  { name: 'Procurement & Supplier', modules: 8, live: 3, perm: 'purchase_order:read' },
+  { name: 'Inventory, Warehouse & Logistics', modules: 10, live: 2, perm: 'stock:read' },
+  { name: 'Gate, Security & Weighbridge', modules: 12, perm: 'gate:read' },
+  { name: 'Shared Manufacturing & MES', modules: 10 },
+  { name: 'Textile Manufacturing Pack', modules: 12 },
+  { name: 'Carton & Corrugated Pack', modules: 12 },
+  { name: 'Quality Management', modules: 9 },
+  { name: 'Maintenance & Utilities', modules: 8 },
+  { name: 'Finance, Cost & Compliance', modules: 15, live: 1, perm: 'stock:read' },
+  { name: 'People, Safety & Sustainability', modules: 17 },
+  { name: 'Reports, AI & Administration', modules: 10 },
+]
 interface Line { id: string; lineNo: number; quantity: string; receivedQuantity: string; rate: string; amount: string; item: { code: string; name: string } }
 interface PO { id: string; documentNo: string; state: string; totalAmount: string; supplier: { name: string }; plant: { code: string }; lines: Line[] }
 interface GRN { id: string; documentNo: string; state: string; postingDate: string; purchaseOrder: { documentNo: string }; lines: { id: string; quantity: string; amount: string; item: { code: string } }[] }
@@ -90,18 +117,48 @@ export default function Page() {
           <div><strong>PRODX</strong><small>Manufacturing ERP</small></div>
         </div>
         {me !== null && (
-          <div className="who">
-            <b>{me.displayName}</b>
-            <small>{me.email}</small>
-            <div className="perm">{me.permissions.map((p) => <span key={p}>{p}</span>)}</div>
-          </div>
+          <>
+            <div className="who">
+              <b>{me.displayName}</b>
+              <small>{me.email}</small>
+              {me.isSuperAdmin && <span className="sa">Superadmin — all factories</span>}
+              <div className="perm">{me.permissions.map((p) => <span key={p}>{p}</span>)}</div>
+            </div>
+
+            <div className="scope">
+              <h3>Factories</h3>
+              {me.plants.map((p) => <div key={p.id} className="sitem"><b>{p.code}</b><small>{p.name}</small></div>)}
+              <h3 style={{ marginTop: 14 }}>Departments</h3>
+              <div className="dchips">
+                {me.departments.length === 0
+                  ? <small style={{ color: '#8aa4ad' }}>none</small>
+                  : [...new Set(me.departments.map((d) => d.code))].map((c) => <span key={c}>{c}</span>)}
+              </div>
+            </div>
+
+            <nav className="nav">
+              {DOMAINS.map((d) => {
+                const visible = d.perm === undefined || me.permissions.some((p) => p === '*' || p === d.perm || p.endsWith(':*') && d.perm?.startsWith(p.slice(0, -1)))
+                return (
+                  <div key={d.name} className={`nrow${visible ? '' : ' dim'}`}>
+                    <span>{d.name}</span>
+                    <b>{d.live === undefined ? d.modules : `${d.live}/${d.modules}`}</b>
+                  </div>
+                )
+              })}
+            </nav>
+          </>
         )}
         <button className="btn" onClick={signOut} style={{ marginTop: 'auto' }}>Sign out</button>
       </aside>
 
       <main className="main">
         <h1>Procure to Receive</h1>
-        <p className="sub">Live data from PostgreSQL through the API, scoped by row level security.</p>
+        <p className="sub">
+          Live data from PostgreSQL. You are seeing{' '}
+          <b>{me?.isSuperAdmin === true ? 'every factory' : me?.plants.map((p) => p.code).join(', ')}</b>
+          {' '}— enforced by row level security in the database, not by a filter in this page.
+        </p>
 
         {error !== '' && <div className="err">{error}</div>}
         {notice !== '' && <div className="ok">{notice}</div>}

@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common'
-import { prisma, withTenantTransaction } from '@prodx/db'
+import { ALL_PLANTS, prisma, withTenantTransaction } from '@prodx/db'
 import { afterAll, describe, expect, it } from 'vitest'
 import { PostingService, type PostingActor } from '../src/posting/posting.service'
 import { seedScenario } from './seed'
@@ -8,6 +8,7 @@ const posting = new PostingService()
 const actor: PostingActor = {
   actorId: '01919000-0000-7000-8000-00000000aaaa',
   permissions: ['goods_receipt:post', 'goods_receipt:reverse'],
+  plantScope: ALL_PLANTS,
   canPostAdjustments: false,
 }
 
@@ -15,8 +16,8 @@ afterAll(async () => {
   await prisma.$disconnect()
 })
 
-const read = async <T>(tenantId: string, fn: Parameters<typeof withTenantTransaction<T>>[1]) =>
-  withTenantTransaction(tenantId, fn)
+const read = async <T>(tenantId: string, fn: Parameters<typeof withTenantTransaction<T>>[2]) =>
+  withTenantTransaction(tenantId, ALL_PLANTS, fn)
 
 describe('posting a goods receipt', () => {
   it('moves stock, values it, writes a balanced journal and consumes the order', async () => {

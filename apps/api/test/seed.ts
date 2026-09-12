@@ -1,4 +1,4 @@
-import { withTenantTransaction, type Prisma } from '@prodx/db'
+import { ALL_PLANTS, withTenantTransaction, type Prisma } from '@prodx/db'
 import { randomUUID } from 'node:crypto'
 
 export interface Scenario {
@@ -46,7 +46,7 @@ export async function seedScenario(
   const { prisma } = await import('@prodx/db')
   await prisma.tenant.create({ data: { id: tenantId, code: `T-${tenantId.slice(0, 8)}`, name: 'Test' } })
 
-  await withTenantTransaction(tenantId, async (tx: Prisma.TransactionClient) => {
+  await withTenantTransaction(tenantId, ALL_PLANTS, async (tx: Prisma.TransactionClient) => {
     await tx.legalEntity.create({
       data: { id: ids.legalEntityId, tenantId, code: 'LE1', name: 'Legal Entity' },
     })

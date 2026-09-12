@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 import type { ExecutionContext } from '@nestjs/common'
+import { ALL_PLANTS } from '@prodx/db'
 import { describe, expect, it } from 'vitest'
 import { runWithContext } from '../tenancy/tenant-context'
 import {
@@ -22,7 +23,10 @@ function guardWith(metadata: Record<string, unknown>): PermissionsGuard {
 }
 
 const withPerms = <T>(permissions: string[], fn: () => T): T =>
-  runWithContext({ tenantId: 't', userId: 'u', permissions }, fn)
+  runWithContext(
+    { tenantId: 't', userId: 'u', permissions, plantScope: ALL_PLANTS, departmentIds: [] },
+    fn,
+  )
 
 describe('PermissionsGuard', () => {
   it('denies a route that declares no permission', () => {

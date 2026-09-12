@@ -22,7 +22,10 @@ describe('AuthMiddleware', () => {
   })
 
   const signed = (claims: Record<string, unknown>): string =>
-    jwt.sign(claims, SECRET, { algorithm: 'HS256', expiresIn: 60 })
+    jwt.sign({ sa: false, plants: [], depts: [], ...claims }, SECRET, {
+      algorithm: 'HS256',
+      expiresIn: 60,
+    })
 
   it('establishes context from the signed claims', () => {
     let seen: ReturnType<typeof currentContext> | undefined
@@ -33,7 +36,7 @@ describe('AuthMiddleware', () => {
         seen = currentContext()
       },
     )
-    expect(seen).toEqual({ tenantId: TENANT, userId: USER, permissions: ['item:read'] })
+    expect(seen).toMatchObject({ tenantId: TENANT, userId: USER, permissions: ['item:read'] })
   })
 
   it('ignores a tenant supplied by header — only the claim counts', () => {
@@ -76,7 +79,10 @@ describe('AuthMiddleware', () => {
   })
 
   it('rejects a token signed with another secret', () => {
-    const forged = jwt.sign({ sub: USER, tid: TENANT, perms: ['*'] }, 'attacker-secret-long-enough')
+    const forged = jwt.sign(
+      { sub: USER, tid: TENANT, perms: ['*'], sa: false, plants: [], depts: [] },
+      'attacker-secret-long-enough',
+    )
     expect(() => middleware.use(req(`Bearer ${forged}`), {} as Response, () => undefined)).toThrow(
       UnauthorizedException,
     )

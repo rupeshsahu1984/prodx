@@ -1,9 +1,17 @@
+import type { PlantScope } from '@prodx/db'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
 export interface RequestContext {
   tenantId: string
   userId: string
   permissions: readonly string[]
+  /**
+   * Which factories this request may touch. Permissions say what the user may
+   * DO; this says what they may do it TO. A plant head and a group buyer can
+   * hold identical permissions and still see different data.
+   */
+  plantScope: PlantScope
+  departmentIds: readonly string[]
 }
 
 const storage = new AsyncLocalStorage<RequestContext>()
@@ -25,3 +33,4 @@ export function currentContext(): RequestContext {
 }
 
 export const currentTenantId = (): string => currentContext().tenantId
+export const currentScope = (): PlantScope => currentContext().plantScope

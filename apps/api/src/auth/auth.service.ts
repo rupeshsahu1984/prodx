@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common'
 import type { LoginRequest, TokenPair } from '@prodx/contracts'
 import { hashPassword, needsRehash, verifyPassword } from '@prodx/core'
-import { prisma, withTenantTransaction } from '@prodx/db'
+import { ALL_PLANTS, prisma, withTenantTransaction } from '@prodx/db'
 import { createHash, randomBytes } from 'node:crypto'
 import { ACCESS_TOKEN_TTL_SECONDS, JwtService } from './jwt.service'
 
@@ -39,10 +39,16 @@ export class AuthService {
     const user =
       tenant === null || !tenant.isActive
         ? null
-        : await withTenantTransaction(tenant.id, (tx) =>
+        : await withTenantTransaction(tenant.id, ALL_PLANTS, (tx) =>
+            // Identity tables carry no plant_id, so plant scope does not apply
+            // here — this is where the user's own scope is being discovered.
             tx.appUser.findUnique({
               where: { tenantId_email: { tenantId: tenant.id, email: request.email.toLowerCase() } },
-              include: { roles: { include: { role: true } } },
+              include: {
+                roles: { include: { role: true } },
+                plantAccess: true,
+                deptAccess: true,
+              },
             }),
           )
 
@@ -68,7 +74,7 @@ export class AuthService {
 
     if (!(await verifyPassword(request.password, user.passwordHash))) {
       const attempts = user.failedLoginAttempts + 1
-      await withTenantTransaction(user.tenantId, (tx) =>
+      await withTenantTransaction(user.tenantId, ALL_PLANTS, (tx) =>
         tx.appUser.update({
           where: { id: user.id },
           data: {
@@ -83,7 +89,7 @@ export class AuthService {
     const rehashed = needsRehash(user.passwordHash)
       ? { passwordHash: await hashPassword(request.password) }
       : {}
-    await withTenantTransaction(user.tenantId, (tx) =>
+    await withTenantTransaction(user.tenantId, ALL_PLANTS, (tx) =>
       tx.appUser.update({
         where: { id: user.id },
         // Transparent upgrade when the cost parameters are raised.
@@ -91,8 +97,12 @@ export class AuthService {
       }),
     )
 
-    const permissions = [...new Set(user.roles.flatMap((r) => r.role.permissions))]
-    return this.issue(user.tenantId, user.id, permissions)
+    return this.issue(user.tenantId, user.id, {
+      permissions: [...new Set(user.roles.flatMap((r) => r.role.permissions))],
+      isSuperAdmin: user.isSuperAdmin,
+      plantIds: user.plantAccess.map((a) => a.plantId),
+      departmentIds: user.deptAccess.map((a) => a.departmentId),
+    })
   }
 
   /**
@@ -110,7 +120,7 @@ export class AuthService {
     const tenantId = tenantIdFromToken(refreshToken)
     if (tenantId === null) throw invalid
 
-    const stored = await withTenantTransaction(tenantId, (tx) =>
+    const stored = await withTenantTransaction(tenantId, ALL_PLANTS, (tx) =>
       tx.refreshToken.findUnique({
         where: { tokenHash: hashToken(refreshToken) },
         include: { user: { include: { roles: { include: { role: true } } } } },
@@ -121,7 +131,7 @@ export class AuthService {
     if (stored.revokedAt !== null) {
       // Reuse of a rotated token means it leaked. Revoke the whole family: the
       // thief and the victim are both signed out, which is the right outcome.
-      await withTenantTransaction(tenantId, (tx) =>
+      await withTenantTransaction(tenantId, ALL_PLANTS, (tx) =>
         tx.refreshToken.updateMany({
           where: { userId: stored.userId, revokedAt: null },
           data: { revokedAt: new Date() },
@@ -132,9 +142,21 @@ export class AuthService {
 
     if (stored.expiresAt <= new Date() || !stored.user.isActive) throw invalid
 
-    const permissions = [...new Set(stored.user.roles.flatMap((r) => r.role.permissions))]
-    const pair = await this.issue(stored.tenantId, stored.userId, permissions)
-    await withTenantTransaction(tenantId, (tx) =>
+    // Scope is re-read on every refresh, so revoking a user's access to a plant
+    // takes effect within one access-token lifetime rather than at next login.
+    const scope = await withTenantTransaction(tenantId, ALL_PLANTS, (tx) =>
+      tx.appUser.findUniqueOrThrow({
+        where: { id: stored.userId },
+        include: { roles: { include: { role: true } }, plantAccess: true, deptAccess: true },
+      }),
+    )
+    const pair = await this.issue(stored.tenantId, stored.userId, {
+      permissions: [...new Set(scope.roles.flatMap((r) => r.role.permissions))],
+      isSuperAdmin: scope.isSuperAdmin,
+      plantIds: scope.plantAccess.map((a) => a.plantId),
+      departmentIds: scope.deptAccess.map((a) => a.departmentId),
+    })
+    await withTenantTransaction(tenantId, ALL_PLANTS, (tx) =>
       tx.refreshToken.update({ where: { id: stored.id }, data: { revokedAt: new Date() } }),
     )
     return pair
@@ -143,7 +165,7 @@ export class AuthService {
   async logout(refreshToken: string): Promise<void> {
     const tenantId = tenantIdFromToken(refreshToken)
     if (tenantId === null) return
-    await withTenantTransaction(tenantId, (tx) =>
+    await withTenantTransaction(tenantId, ALL_PLANTS, (tx) =>
       tx.refreshToken.updateMany({
         where: { tokenHash: hashToken(refreshToken), revokedAt: null },
         data: { revokedAt: new Date() },
@@ -154,13 +176,18 @@ export class AuthService {
   private async issue(
     tenantId: string,
     userId: string,
-    permissions: string[],
+    scope: {
+      permissions: string[]
+      isSuperAdmin: boolean
+      plantIds: string[]
+      departmentIds: string[]
+    },
   ): Promise<TokenPair> {
     // `<tenantId>.<secret>`. The tenant is a routing hint so the lookup can
     // establish RLS context — it is not a secret, and it is already visible in
     // the access token. All the entropy is in the second half.
     const refreshToken = `${tenantId}.${randomBytes(32).toString('base64url')}`
-    await withTenantTransaction(tenantId, (tx) =>
+    await withTenantTransaction(tenantId, ALL_PLANTS, (tx) =>
       tx.refreshToken.create({
         data: {
           tenantId,
@@ -171,7 +198,14 @@ export class AuthService {
       }),
     )
     return {
-      accessToken: this.jwt.sign({ sub: userId, tid: tenantId, perms: permissions }),
+      accessToken: this.jwt.sign({
+        sub: userId,
+        tid: tenantId,
+        perms: scope.permissions,
+        sa: scope.isSuperAdmin,
+        plants: scope.plantIds,
+        depts: scope.departmentIds,
+      }),
       refreshToken,
       expiresIn: ACCESS_TOKEN_TTL_SECONDS,
     }

@@ -1,4 +1,5 @@
 import { Injectable, UnauthorizedException, type NestMiddleware } from '@nestjs/common'
+import { ALL_PLANTS } from '@prodx/db'
 import type { NextFunction, Request, Response } from 'express'
 import { runWithContext } from '../tenancy/tenant-context'
 import { JwtService } from './jwt.service'
@@ -27,8 +28,17 @@ export class AuthMiddleware implements NestMiddleware {
       throw new UnauthorizedException({ code: 'INVALID_TOKEN', message: 'Token is not valid' })
     }
 
-    runWithContext({ tenantId: claims.tid, userId: claims.sub, permissions: claims.perms }, () =>
-      next(),
+    runWithContext(
+      {
+        tenantId: claims.tid,
+        userId: claims.sub,
+        permissions: claims.perms,
+        // A superadmin gets the explicit all-plants sentinel; everyone else gets
+        // exactly their assignments, and an empty list therefore sees nothing.
+        plantScope: claims.sa ? ALL_PLANTS : claims.plants,
+        departmentIds: claims.depts,
+      },
+      () => next(),
     )
   }
 }

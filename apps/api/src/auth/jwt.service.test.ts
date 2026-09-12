@@ -16,6 +16,9 @@ describe('JwtService', () => {
     sub: '01919000-0000-7000-8000-00000000aaaa',
     tid: '01919000-0000-7000-8000-00000000bbbb',
     perms: ['purchase_order:read'],
+    sa: false,
+    plants: ['01919000-0000-7000-8000-0000000000p1'.replace(/p/g, 'c')],
+    depts: [],
   }
 
   it('round-trips valid claims', () => {

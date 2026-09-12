@@ -26,6 +26,10 @@ describe('tenant isolation (RLS)', () => {
   beforeAll(async () => {
     owner = await connect(OWNER_URL)
     app = await connect(APP_URL)
+    // These tables carry no plant_id; the sentinel keeps plant scope out of the way
+    // so this suite tests tenant isolation on its own.
+    await owner.query("SELECT set_config('app.plant_scope', '*', false)")
+    await app.query("SELECT set_config('app.plant_scope', '*', false)")
     await seedTwoTenants(owner)
   })
 

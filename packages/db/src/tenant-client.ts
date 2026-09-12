@@ -3,6 +3,19 @@ import { PrismaClient, type Prisma } from '@prisma/client'
 export const prisma = new PrismaClient()
 
 /**
+ * Which factories the caller may touch.
+ *
+ * `ALL_PLANTS` is the explicit sentinel for a tenant superadmin and for platform
+ * paths such as seeding. It is deliberately not a default: the scope is a
+ * required argument everywhere, so the only way to see every plant is to say so.
+ */
+export const ALL_PLANTS = '*' as const
+export type PlantScope = typeof ALL_PLANTS | readonly string[]
+
+const serializeScope = (scope: PlantScope): string =>
+  scope === ALL_PLANTS ? ALL_PLANTS : scope.join(',')
+
+/**
  * Returns a Prisma client scoped to one tenant (ADR 0002).
  *
  * Every operation is wrapped in a transaction that first sets `app.tenant_id`,
@@ -18,13 +31,15 @@ export const prisma = new PrismaClient()
  *  3. Nothing outside the request path gets this for free. Jobs, migrations and
  *     report queries must establish tenant context explicitly.
  */
-export function forTenant(tenantId: string) {
+export function forTenant(tenantId: string, scope: PlantScope) {
+  const plantScope = serializeScope(scope)
   return prisma.$extends({
     query: {
       $allModels: {
         async $allOperations({ args, query }) {
-          const [, result] = await prisma.$transaction([
+          const [, , result] = await prisma.$transaction([
             prisma.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}::text, true)`,
+            prisma.$executeRaw`SELECT set_config('app.plant_scope', ${plantScope}, true)`,
             query(args),
           ])
           return result
@@ -54,12 +69,15 @@ export type TenantClient = ReturnType<typeof forTenant>
  */
 export async function withTenantTransaction<T>(
   tenantId: string,
+  scope: PlantScope,
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
   options?: { timeoutMs?: number },
 ): Promise<T> {
+  const plantScope = serializeScope(scope)
   return prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}::text, true)`
+      await tx.$executeRaw`SELECT set_config('app.plant_scope', ${plantScope}, true)`
       return fn(tx)
     },
     { timeout: options?.timeoutMs ?? 15_000 },

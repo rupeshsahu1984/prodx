@@ -21,12 +21,23 @@ export class OperationsController {
   @Get('me')
   @AnyAuthenticated()
   async me(): Promise<unknown> {
-    const { userId, tenantId, permissions } = currentContext()
+    const { userId, tenantId, permissions, departmentIds } = currentContext()
     const user = await this.prisma.db.appUser.findUniqueOrThrow({
       where: { id: userId },
-      select: { email: true, displayName: true },
+      select: { email: true, displayName: true, isSuperAdmin: true },
     })
-    return { userId, tenantId, permissions, ...user }
+    // Reads through the scoped client, so this returns only the plants the
+    // caller may actually see — the list is the scope, not a copy of it.
+    const [plants, departments] = await Promise.all([
+      this.prisma.db.plant.findMany({ select: { id: true, code: true, name: true } }),
+      departmentIds.length === 0
+        ? this.prisma.db.department.findMany({ select: { id: true, code: true, name: true } })
+        : this.prisma.db.department.findMany({
+            where: { id: { in: [...departmentIds] } },
+            select: { id: true, code: true, name: true },
+          }),
+    ])
+    return { userId, tenantId, permissions, ...user, plants, departments }
   }
 
   @Get('purchase-orders')
@@ -105,10 +116,10 @@ export class OperationsController {
     @Param('id', ParseUUIDPipe) purchaseOrderId: string,
     @Body() body: { postingDate?: string },
   ): Promise<{ goodsReceiptId: string }> {
-    const { tenantId } = currentContext()
+    const { tenantId, plantScope } = currentContext()
     const { withTenantTransaction } = await import('@prodx/db')
 
-    return withTenantTransaction(tenantId, async (tx) => {
+    return withTenantTransaction(tenantId, plantScope, async (tx) => {
       const po = await tx.purchaseOrder.findUniqueOrThrow({
         where: { id: purchaseOrderId },
         include: { lines: { orderBy: { lineNo: 'asc' }, include: { item: true } } },
@@ -165,10 +176,11 @@ export class OperationsController {
   @RequirePermission('goods_receipt:post')
   @HttpCode(200)
   async post(@Param('id', ParseUUIDPipe) id: string): Promise<{ documentNo: string }> {
-    const { tenantId, userId, permissions } = currentContext()
+    const { tenantId, userId, permissions, plantScope } = currentContext()
     return this.posting.postGoodsReceipt(tenantId, id, {
       actorId: userId,
       permissions,
+      plantScope,
       canPostAdjustments: false,
     })
   }
@@ -177,10 +189,11 @@ export class OperationsController {
   @RequirePermission('goods_receipt:reverse')
   @HttpCode(204)
   async reverse(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    const { tenantId, userId, permissions } = currentContext()
+    const { tenantId, userId, permissions, plantScope } = currentContext()
     await this.posting.reverseGoodsReceipt(tenantId, id, {
       actorId: userId,
       permissions,
+      plantScope,
       canPostAdjustments: false,
     })
   }

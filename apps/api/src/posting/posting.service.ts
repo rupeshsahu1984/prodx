@@ -9,7 +9,7 @@ import {
   type PeriodStatus,
   type ValuationState,
 } from '@prodx/core'
-import { withTenantTransaction, type Prisma } from '@prodx/db'
+import { withTenantTransaction, type Prisma, type PlantScope } from '@prodx/db'
 import Decimal from 'decimal.js'
 import { PrismaNumberSeriesAdapter } from '../numbering/number-series.adapter'
 
@@ -19,6 +19,8 @@ const D = (value: Prisma.Decimal | string | number): Decimal => new Decimal(valu
 export interface PostingActor {
   actorId: string
   permissions: readonly string[]
+  /** The factories this actor may post into. Enforced by RLS, not by a filter. */
+  plantScope: PlantScope
   /** Only an actor with the adjustment permission may post into a soft-closed period. */
   canPostAdjustments: boolean
 }
@@ -38,7 +40,7 @@ export class PostingService {
     goodsReceiptId: string,
     actor: PostingActor,
   ): Promise<{ documentNo: string }> {
-    return withTenantTransaction(tenantId, async (tx) => {
+    return withTenantTransaction(tenantId, actor.plantScope, async (tx) => {
       const grn = await tx.goodsReceipt.findUnique({
         where: { id: goodsReceiptId },
         include: { lines: { orderBy: { lineNo: 'asc' } }, purchaseOrder: true },
@@ -173,7 +175,7 @@ export class PostingService {
     goodsReceiptId: string,
     actor: PostingActor,
   ): Promise<void> {
-    await withTenantTransaction(tenantId, async (tx) => {
+    await withTenantTransaction(tenantId, actor.plantScope, async (tx) => {
       const grn = await tx.goodsReceipt.findUnique({
         where: { id: goodsReceiptId },
         include: { lines: { orderBy: { lineNo: 'asc' } } },

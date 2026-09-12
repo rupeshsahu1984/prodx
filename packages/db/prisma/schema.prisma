@@ -85,6 +85,8 @@ model Plant {
   purchaseOrders PurchaseOrder[]
   gateEvents     GateEvent[]
   goodsReceipts  GoodsReceipt[]
+  departments    Department[]
+  userAccess     UserPlantAccess[]
 
   @@unique([tenantId, code])
   @@index([tenantId, legalEntityId])
@@ -145,13 +147,19 @@ model AppUser {
   createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
   updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
+  /// Tenant-wide administrator: every plant, every department. Still confined
+  /// to this tenant — there is no cross-tenant user.
+  isSuperAdmin Boolean @default(false) @map("is_super_admin")
+
   /// Brute-force protection. Cleared on a successful login.
   failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
   lockedUntil         DateTime? @map("locked_until") @db.Timestamptz(6)
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   roles         UserRole[]
   refreshTokens RefreshToken[]
+  plantAccess   UserPlantAccess[]
+  deptAccess    UserDepartmentAccess[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -970,4 +978,65 @@ model GoodsReceiptLine {
   @@unique([tenantId, goodsReceiptId, lineNo])
   @@index([tenantId, purchaseOrderLineId])
   @@map("goods_receipt_line")
+}
+
+// ───────────────────────────── access scope ─────────────────────────────
+//
+// Two dimensions decide what a user may do:
+//   permissions — WHICH ACTIONS (roles, checked by the guard)
+//   scope       — WHICH DATA   (plants and departments, enforced by RLS)
+//
+// They are deliberately separate. A plant head and a group buyer may hold the
+// same permissions and still see completely different data.
+
+model Department {
+  id       String  @id @default(uuid(7)) @db.Uuid
+  tenantId String  @db.Uuid @map("tenant_id")
+  plantId  String  @db.Uuid @map("plant_id")
+  code     String
+  name     String
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plant      Plant                  @relation(fields: [plantId], references: [id], onDelete: Restrict)
+  userAccess UserDepartmentAccess[]
+
+  @@unique([tenantId, plantId, code])
+  @@index([tenantId, plantId])
+  @@map("department")
+}
+
+/// Which factories a user may see. A superadmin needs no rows here.
+model UserPlantAccess {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  tenantId  String   @db.Uuid @map("tenant_id")
+  userId    String   @db.Uuid @map("user_id")
+  plantId   String   @db.Uuid @map("plant_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user  AppUser @relation(fields: [userId], references: [id], onDelete: Restrict)
+  plant Plant   @relation(fields: [plantId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, userId, plantId])
+  @@index([tenantId, userId])
+  @@map("user_plant_access")
+}
+
+/// Which departments within those factories. Empty means every department of
+/// the plants the user can see — a plant head is not restricted by department.
+model UserDepartmentAccess {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  tenantId     String   @db.Uuid @map("tenant_id")
+  userId       String   @db.Uuid @map("user_id")
+  departmentId String   @db.Uuid @map("department_id")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user       AppUser    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, userId, departmentId])
+  @@index([tenantId, userId])
+  @@map("user_department_access")
 }
