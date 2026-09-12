@@ -7,12 +7,15 @@
 -- Why FORCE: the owning role bypasses RLS by default, and Prisma is commonly
 -- pointed at the owner. FORCE closes that, and the application additionally
 -- connects as prodx_app, which owns nothing.
+--
+-- The prodx_app role is created by scripts/create-app-role.sql, which requires
+-- a password to be supplied. No credential appears in this file.
 
--- Application role. Owns no objects, so it can never bypass a policy.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'prodx_app') THEN
-    CREATE ROLE prodx_app LOGIN PASSWORD 'change-me';
+    RAISE EXCEPTION
+      'Role prodx_app does not exist. Run scripts/create-app-role.sql first.';
   END IF;
 END
 $$;

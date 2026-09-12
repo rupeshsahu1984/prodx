@@ -32,22 +32,37 @@ prototype/         The original prototype (spec)
 
 ```bash
 pnpm install
-cp .env.example .env          # then edit the credentials
+cp .env.example .env          # then replace every REPLACE_ME
 
 # Postgres 16+ and Redis 7+ are expected on the URLs in .env
 pnpm db:migrate               # creates the schema
-psql "$DATABASE_MIGRATION_URL" -f packages/db/scripts/rls.sql   # REQUIRED — see below
 pnpm db:generate
+
+# Tenant isolation. Both are REQUIRED — see below.
+psql "$DATABASE_MIGRATION_URL" -v app_password="$PRODX_APP_PASSWORD" \
+     -f packages/db/scripts/create-app-role.sql
+psql "$DATABASE_MIGRATION_URL" -f packages/db/scripts/rls.sql
 
 pnpm dev                      # api :3001, web :3000
 ```
+
+### Phase 0 has no authentication
+
+There is no login yet, so there is no trustworthy source for the tenant id. The API
+therefore **fails closed**: every tenant-scoped route returns 503 unless
+`PRODX_ALLOW_HEADER_TENANT=1` is set, and that flag is ignored in production — where the
+process refuses to start at all. The header stub exists to let the stack be exercised
+end to end, never to be deployed.
+
+Phase 1 replaces it with a verified JWT whose signed claim carries the tenant.
 
 ### RLS is not optional
 
 `scripts/rls.sql` is what actually enforces tenant isolation (ADR 0002). Until it has run,
 every tenant can read every other tenant's data. It:
 
-- creates the non-owner `prodx_app` role the application connects as,
+- asserts the non-owner `prodx_app` role exists (created by `create-app-role.sql`,
+  which requires a password to be supplied rather than carrying one),
 - enables **and forces** row level security on every table with a `tenant_id`,
 - installs append-only triggers on the stock ledger, genealogy, journal and audit tables.
 
