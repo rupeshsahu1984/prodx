@@ -27,7 +27,7 @@ manufacturing · quality · maintenance · finance · people · integration.
 apps/api           NestJS — modular monolith
 apps/web           Next.js App Router
 apps/worker        BullMQ processors (separate deployable, shared code)
-packages/db        Prisma schema (multi-file), migrations, client extensions
+packages/db        Prisma schema, migrations, tenant client extension
 packages/contracts Zod schemas — the one API contract, imported by both sides
 packages/core      Engines. Framework-agnostic, no Nest, no Prisma imports.
 packages/ui        Design system ported from the prototype

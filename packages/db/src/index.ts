@@ -1,0 +1,3 @@
+export { prisma, forTenant } from './tenant-client'
+export type { TenantClient } from './tenant-client'
+export * from '@prisma/client'

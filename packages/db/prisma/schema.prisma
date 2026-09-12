@@ -1,0 +1,609 @@
+// PRODX ERP — foundation schema (Phase 0)
+//
+// Encodes ADR 0003 (org hierarchy), 0004 (dual UoM), 0005 (valuation),
+// 0006 (stock unit + genealogy), 0007 (fiscal periods), 0008 (numbering).
+//
+// Rules that hold for every model below:
+//   - tenantId on every business table; RLS enforces it (ADR 0002, scripts/rls.sql).
+//   - Money and quantity are Decimal, never Float.
+//   - Every timestamp is timestamptz. Business dates are separate from system timestamps.
+//   - Append-only tables have no updatedAt and are protected by a trigger.
+//
+// This is one file while the foundation is small. It splits into prisma/schema/
+// once module schemas land — the split is mechanical, the decisions are not.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── organization (ADR 0003) ─────────────────────────────
+
+model Tenant {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  code      String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  legalEntities LegalEntity[]
+  users         AppUser[]
+
+  @@map("tenant")
+}
+
+model LegalEntity {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+  code     String
+  name     String
+
+  /// GSTIN is per legal entity per state, not per tenant.
+  taxRegistrationNo String?
+  baseCurrency      String  @default("INR") @db.Char(3)
+  isActive          Boolean @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  plants       Plant[]
+  fiscalYears  FiscalYear[]
+  glAccounts   GlAccount[]
+  numberSeries NumberSeries[]
+  journals     JournalEntry[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("legal_entity")
+}
+
+model Plant {
+  id            String  @id @default(uuid(7)) @db.Uuid
+  tenantId      String  @db.Uuid
+  legalEntityId String  @db.Uuid
+  code          String
+  name          String
+  /// Rejecting negative stock keeps weighted-average valuation meaningful (ADR 0005).
+  allowNegativeStock Boolean @default(false)
+  isActive      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  legalEntity LegalEntity          @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  warehouses  Warehouse[]
+  valuations  ItemPlantValuation[]
+  ledger      StockLedgerEntry[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, legalEntityId])
+  @@map("plant")
+}
+
+model Warehouse {
+  id       String  @id @default(uuid(7)) @db.Uuid
+  tenantId String  @db.Uuid
+  plantId  String  @db.Uuid
+  code     String
+  name     String
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  plant     Plant             @relation(fields: [plantId], references: [id], onDelete: Restrict)
+  locations StorageLocation[]
+
+  @@unique([tenantId, plantId, code])
+  @@index([tenantId, plantId])
+  @@map("warehouse")
+}
+
+model StorageLocation {
+  id          String  @id @default(uuid(7)) @db.Uuid
+  tenantId    String  @db.Uuid
+  warehouseId String  @db.Uuid
+  code        String
+  name        String
+  /// Stock physically at a subcontractor is still ours (gap 20). Modelled as a
+  /// location type rather than a separate table, so it flows through one ledger.
+  isThirdParty Boolean @default(false)
+  isActive     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  warehouse Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  balances  StockBalance[]
+  ledger    StockLedgerEntry[]
+
+  @@unique([tenantId, warehouseId, code])
+  @@index([tenantId, warehouseId])
+  @@map("storage_location")
+}
+
+model AppUser {
+  id           String  @id @default(uuid(7)) @db.Uuid
+  tenantId     String  @db.Uuid
+  email        String
+  displayName  String
+  passwordHash String
+  isActive     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("app_user")
+}
+
+// ───────────────────────────── item & unit of measure (ADR 0004) ─────────────────────────────
+
+model Uom {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+  code     String
+  name     String
+  /// LENGTH, MASS, AREA, VOLUME, COUNT — conversions are only valid within a dimension,
+  /// except item-specific ones, which is exactly why those are a separate table.
+  dimension String
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  itemsBase      Item[]              @relation("ItemBaseUom")
+  itemsSecondary Item[]              @relation("ItemSecondaryUom")
+  conversionFrom UomConversion[]     @relation("UomConversionFrom")
+  conversionTo   UomConversion[]     @relation("UomConversionTo")
+  itemConversion ItemUomConversion[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("uom")
+}
+
+/// Dimensionless conversions only (kg↔g, m↔cm). Anything that depends on the
+/// material lives in ItemUomConversion.
+model UomConversion {
+  id        String  @id @default(uuid(7)) @db.Uuid
+  tenantId  String  @db.Uuid
+  fromUomId String  @db.Uuid
+  toUomId   String  @db.Uuid
+  factor    Decimal @db.Decimal(24, 12)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  fromUom Uom @relation("UomConversionFrom", fields: [fromUomId], references: [id], onDelete: Restrict)
+  toUom   Uom @relation("UomConversionTo", fields: [toUomId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, fromUomId, toUomId])
+  @@map("uom_conversion")
+}
+
+model Item {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+  code     String
+  name     String
+
+  /// All stock is stored in this unit (ADR 0004).
+  baseUomId String @db.Uuid
+
+  /// Dual-UoM items carry a second quantity on every movement and balance.
+  /// A fabric roll is metres AND kilograms; both are recorded, neither is derived.
+  isDualUom      Boolean @default(false)
+  secondaryUomId String? @db.Uuid
+
+  granularity StockGranularity @default(LOT)
+
+  /// Characteristics (style, colour, size, GSM, width) rather than flat SKUs (gap 19).
+  characteristics Json @default("{}")
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  baseUom      Uom                 @relation("ItemBaseUom", fields: [baseUomId], references: [id], onDelete: Restrict)
+  secondaryUom Uom?                @relation("ItemSecondaryUom", fields: [secondaryUomId], references: [id], onDelete: Restrict)
+  conversions  ItemUomConversion[]
+  stockUnits   StockUnit[]
+  valuations   ItemPlantValuation[]
+  ledger       StockLedgerEntry[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("item")
+}
+
+/// Item-specific conversion. Metres↔kilograms depends on GSM and width, so it
+/// cannot live in a global table (ADR 0004).
+model ItemUomConversion {
+  id       String  @id @default(uuid(7)) @db.Uuid
+  tenantId String  @db.Uuid
+  itemId   String  @db.Uuid
+  uomId    String  @db.Uuid
+  /// Quantity of baseUom represented by one of uomId.
+  factor   Decimal @db.Decimal(24, 12)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  uom  Uom  @relation(fields: [uomId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, itemId, uomId])
+  @@index([tenantId, itemId])
+  @@map("item_uom_conversion")
+}
+
+// ───────────────────────────── inventory (ADR 0005, 0006) ─────────────────────────────
+
+enum StockGranularity {
+  BULK
+  LOT
+  SERIAL
+}
+
+/// The tracked physical entity. A textile roll is SERIAL; a board batch is LOT;
+/// consumables are BULK. BULK items still get a row so the ledger has one uniform
+/// shape — a nullable stock unit would put a branch in every inventory query forever.
+model StockUnit {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+  itemId   String @db.Uuid
+  /// Lot code, roll number or batch number as the plant knows it.
+  reference String
+
+  granularity StockGranularity
+
+  /// Attributes allocation may constrain on. Shade band is what makes dye-lot
+  /// continuity possible (gap 18) — generic ERPs cannot express this.
+  shadeBand String?
+  grade     String?
+
+  /// Measured, not computed. The weighbridge and the roll scale are the source.
+  secondaryQuantity Decimal? @db.Decimal(18, 6)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  item      Item               @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  balances  StockBalance[]
+  ledger    StockLedgerEntry[]
+  parents   StockUnitLink[]    @relation("LinkChild")
+  children  StockUnitLink[]    @relation("LinkParent")
+
+  @@unique([tenantId, itemId, reference])
+  @@index([tenantId, itemId])
+  @@index([tenantId, shadeBand])
+  @@map("stock_unit")
+}
+
+/// Genealogy is a DAG, not a tree (ADR 0006). A beam splits into many rolls;
+/// several rolls merge into one shipment. A parentId column cannot express a merge,
+/// and a recall must traverse both directions.
+///
+/// Append-only: a correction adds a reversing transformation, it never deletes an edge.
+model StockUnitLink {
+  id                  String  @id @default(uuid(7)) @db.Uuid
+  tenantId            String  @db.Uuid
+  parentStockUnitId   String  @db.Uuid
+  childStockUnitId    String  @db.Uuid
+  /// The document that caused the link — work order, grading, packing list — so the
+  /// trace explains itself rather than being a bare edge.
+  transformationType  String
+  transformationId    String  @db.Uuid
+  quantityContributed Decimal @db.Decimal(18, 6)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  parent StockUnit @relation("LinkParent", fields: [parentStockUnitId], references: [id], onDelete: Restrict)
+  child  StockUnit @relation("LinkChild", fields: [childStockUnitId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, parentStockUnitId, childStockUnitId, transformationId])
+  @@index([tenantId, parentStockUnitId])
+  @@index([tenantId, childStockUnitId])
+  @@map("stock_unit_link")
+}
+
+enum LedgerDirection {
+  IN
+  OUT
+}
+
+/// Append-only. Balances are projections of this table and are never the source of truth.
+model StockLedgerEntry {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+  plantId  String @db.Uuid
+
+  itemId            String @db.Uuid
+  stockUnitId       String @db.Uuid
+  storageLocationId String @db.Uuid
+
+  direction LedgerDirection
+
+  /// Always in the item's base UoM (ADR 0004).
+  quantity Decimal @db.Decimal(18, 6)
+  /// Dual-UoM items carry the second quantity here. Captured, not derived.
+  secondaryQuantity Decimal? @db.Decimal(18, 6)
+
+  /// Moving weighted average at the time of the movement (ADR 0005).
+  unitCost   Decimal @db.Decimal(18, 6)
+  totalValue Decimal @db.Decimal(18, 2)
+
+  /// The business date the movement belongs to. Distinct from createdAt, and the
+  /// value the fiscal period is resolved from (ADR 0007).
+  postingDate DateTime @db.Date
+
+  sourceType String
+  sourceId   String   @db.Uuid
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  plant           Plant           @relation(fields: [plantId], references: [id], onDelete: Restrict)
+  item            Item            @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  stockUnit       StockUnit       @relation(fields: [stockUnitId], references: [id], onDelete: Restrict)
+  storageLocation StorageLocation @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, plantId, itemId, postingDate])
+  @@index([tenantId, stockUnitId])
+  @@index([tenantId, sourceType, sourceId])
+  @@map("stock_ledger_entry")
+}
+
+/// Projection of the ledger, maintained in the same transaction as the ledger insert.
+model StockBalance {
+  id                String @id @default(uuid(7)) @db.Uuid
+  tenantId          String @db.Uuid
+  stockUnitId       String @db.Uuid
+  storageLocationId String @db.Uuid
+
+  quantity          Decimal  @db.Decimal(18, 6)
+  secondaryQuantity Decimal? @db.Decimal(18, 6)
+
+  /// Optimistic locking — two pickers must not both allocate the last roll.
+  version   Int      @default(0)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  stockUnit       StockUnit       @relation(fields: [stockUnitId], references: [id], onDelete: Restrict)
+  storageLocation StorageLocation @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, stockUnitId, storageLocationId])
+  @@index([tenantId, storageLocationId])
+  @@map("stock_balance")
+}
+
+/// Moving weighted average per item and plant (ADR 0005). Updated inside the same
+/// transaction as the ledger insert, never recomputed from scratch at read time.
+model ItemPlantValuation {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+  itemId   String @db.Uuid
+  plantId  String @db.Uuid
+
+  quantityOnHand Decimal @db.Decimal(18, 6)
+  totalValue     Decimal @db.Decimal(18, 2)
+  /// Derived: totalValue / quantityOnHand. Stored so the ledger can record the
+  /// cost that actually applied at the moment of the movement.
+  unitCost       Decimal @db.Decimal(18, 6)
+
+  version   Int      @default(0)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  item  Item  @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  plant Plant @relation(fields: [plantId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, itemId, plantId])
+  @@map("item_plant_valuation")
+}
+
+// ───────────────────────────── fiscal calendar (ADR 0007) ─────────────────────────────
+
+enum PeriodStatus {
+  OPEN
+  SOFT_CLOSED
+  CLOSED
+}
+
+model FiscalYear {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  tenantId      String   @db.Uuid
+  legalEntityId String   @db.Uuid
+  /// Indian fiscal year label, e.g. "2026-27".
+  code          String
+  startDate     DateTime @db.Date
+  endDate       DateTime @db.Date
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  legalEntity LegalEntity    @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  periods     FiscalPeriod[]
+
+  @@unique([tenantId, legalEntityId, code])
+  @@map("fiscal_year")
+}
+
+model FiscalPeriod {
+  id           String       @id @default(uuid(7)) @db.Uuid
+  tenantId     String       @db.Uuid
+  fiscalYearId String       @db.Uuid
+  sequence     Int
+  startDate    DateTime     @db.Date
+  endDate      DateTime     @db.Date
+  status       PeriodStatus @default(OPEN)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  fiscalYear FiscalYear @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, fiscalYearId, sequence])
+  @@index([tenantId, startDate, endDate])
+  @@map("fiscal_period")
+}
+
+// ───────────────────────────── general ledger ─────────────────────────────
+
+model GlAccount {
+  id            String  @id @default(uuid(7)) @db.Uuid
+  tenantId      String  @db.Uuid
+  legalEntityId String  @db.Uuid
+  code          String
+  name          String
+  /// ASSET, LIABILITY, EQUITY, INCOME, EXPENSE
+  accountType   String
+  isPostable    Boolean @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  legalEntity LegalEntity   @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  lines       JournalLine[]
+
+  @@unique([tenantId, legalEntityId, code])
+  @@map("gl_account")
+}
+
+/// Append-only. A posted entry is never edited — it is reversed and reposted.
+model JournalEntry {
+  id            String @id @default(uuid(7)) @db.Uuid
+  tenantId      String @db.Uuid
+  legalEntityId String @db.Uuid
+
+  documentNo  String
+  postingDate DateTime @db.Date
+  narration   String?
+
+  sourceType String
+  sourceId   String @db.Uuid
+
+  /// Set when this entry reverses another. Never both edited and reversed.
+  reversesJournalEntryId String? @db.Uuid
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  legalEntity LegalEntity   @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  lines       JournalLine[]
+
+  @@unique([tenantId, legalEntityId, documentNo])
+  @@index([tenantId, legalEntityId, postingDate])
+  @@index([tenantId, sourceType, sourceId])
+  @@map("journal_entry")
+}
+
+model JournalLine {
+  id             String  @id @default(uuid(7)) @db.Uuid
+  tenantId       String  @db.Uuid
+  journalEntryId String  @db.Uuid
+  glAccountId    String  @db.Uuid
+  lineNo         Int
+  debit          Decimal @default(0) @db.Decimal(18, 2)
+  credit         Decimal @default(0) @db.Decimal(18, 2)
+  /// Cost centre, plant, project — reporting dimensions kept out of the account code.
+  dimensions     Json    @default("{}")
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
+  glAccount    GlAccount    @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, journalEntryId, lineNo])
+  @@index([tenantId, glAccountId])
+  @@map("journal_line")
+}
+
+// ───────────────────────────── platform services ─────────────────────────────
+
+/// Gapless numbering (ADR 0008). Incremented with UPDATE … RETURNING inside the
+/// document's own transaction, so a rollback returns the number.
+model NumberSeries {
+  id            String @id @default(uuid(7)) @db.Uuid
+  tenantId      String @db.Uuid
+  legalEntityId String @db.Uuid
+  seriesCode    String
+  fiscalYear    String
+  /// Placeholders: {FY}, {####}. Resolved after the number is allocated.
+  format        String
+  nextValue     Int    @default(1)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  legalEntity LegalEntity @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, legalEntityId, seriesCode, fiscalYear])
+  @@map("number_series")
+}
+
+/// Append-only: who changed what, when, why and from which source.
+model AuditEvent {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  tenantId   String   @db.Uuid
+  actorId    String?  @db.Uuid
+  entityType String
+  entityId   String   @db.Uuid
+  action     String
+  /// Only the changed fields, before and after. Never the whole row — payroll and
+  /// bank details must not be duplicated into the audit log.
+  changes    Json     @default("{}")
+  reason     String?
+  source     String
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([tenantId, entityType, entityId, createdAt])
+  @@index([tenantId, actorId, createdAt])
+  @@map("audit_event")
+}
+
+enum OutboxStatus {
+  PENDING
+  SENT
+  FAILED
+  DEAD
+}
+
+/// Transactional outbox (gap 9). External calls never happen inside a database
+/// transaction; the intent is committed here and a worker delivers it.
+model OutboxMessage {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  tenantId    String       @db.Uuid
+  topic       String
+  payload     Json
+  status      OutboxStatus @default(PENDING)
+  attempts    Int          @default(0)
+  lastError   String?
+  availableAt DateTime     @default(now()) @db.Timestamptz(6)
+  createdAt   DateTime     @default(now()) @db.Timestamptz(6)
+  sentAt      DateTime?    @db.Timestamptz(6)
+
+  @@index([status, availableAt])
+  @@index([tenantId, topic, createdAt])
+  @@map("outbox_message")
+}
+
+/// Gate scanners double-tap and weighbridges resend over flaky serial links (gap 8).
+/// The stored response is replayed rather than the operation being repeated.
+model IdempotencyKey {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  tenantId    String   @db.Uuid
+  source      String
+  externalRef String
+  requestHash String
+  response    Json?
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([tenantId, source, externalRef])
+  @@index([tenantId, createdAt])
+  @@map("idempotency_key")
+}

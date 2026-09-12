@@ -58,7 +58,7 @@ stop and lift it into an engine.
 apps/api          NestJS — modular monolith, NOT microservices
 apps/web          Next.js App Router
 apps/worker       BullMQ processors (own deployable, shared codebase)
-packages/db       Prisma schema (multi-file), migrations, client extensions
+packages/db       Prisma schema, migrations, tenant client extension
 packages/contracts Zod schemas — the single API contract shared by api + web
 packages/core     Domain engines (framework-agnostic, heavily unit-tested)
 packages/ui       Design system ported from the prototype
