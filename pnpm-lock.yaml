@@ -41,6 +41,9 @@ importers:
       '@prodx/db':
         specifier: workspace:*
         version: link:../../packages/db
+      decimal.js:
+        specifier: ^10.4.3
+        version: 10.6.0
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3
@@ -69,6 +72,12 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.2
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
       typescript:
         specifier: ^5.7.2
         version: 5.9.3

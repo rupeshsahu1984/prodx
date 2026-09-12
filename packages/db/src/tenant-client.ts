@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, type Prisma } from '@prisma/client'
 
 export const prisma = new PrismaClient()
 
@@ -35,3 +35,33 @@ export function forTenant(tenantId: string) {
 }
 
 export type TenantClient = ReturnType<typeof forTenant>
+
+/**
+ * Runs a multi-statement business operation inside ONE transaction, with the
+ * tenant set once for its duration.
+ *
+ * `forTenant` above wraps each operation in its own transaction, which is right
+ * for a single read but wrong for anything that must be atomic: a goods receipt
+ * posts stock, updates valuation, writes a journal and updates the purchase
+ * order, and either all of that happens or none of it does.
+ *
+ * Use this for every write path. Use `forTenant` for reads.
+ *
+ * Nothing external may be called inside `fn` — no HTTP, no queue publish, no
+ * file upload. Emit an outbox row instead and let a worker deliver it: holding
+ * a transaction open across a network call also holds the number-series row
+ * lock, which serialises every other document in that series (ADR 0008).
+ */
+export async function withTenantTransaction<T>(
+  tenantId: string,
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  options?: { timeoutMs?: number },
+): Promise<T> {
+  return prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}::text, true)`
+      return fn(tx)
+    },
+    { timeout: options?.timeoutMs ?? 15_000 },
+  )
+}

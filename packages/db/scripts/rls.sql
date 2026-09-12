@@ -71,7 +71,10 @@ DECLARE
   t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY[
-    'stock_ledger_entry', 'stock_unit_link', 'journal_entry', 'journal_line', 'audit_event'
+    'stock_ledger_entry', 'stock_unit_link', 'journal_entry', 'journal_line', 'audit_event',
+    -- A gate or weighbridge record states what physically happened. A correction
+    -- is a new event; an approval is a fact about who decided what, and when.
+    'gate_event', 'weighbridge_ticket', 'approval_record'
   ] LOOP
     EXECUTE format('DROP TRIGGER IF EXISTS %I_append_only ON public.%I', t, t);
     EXECUTE format(

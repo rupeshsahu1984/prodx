@@ -51,12 +51,14 @@ model LegalEntity {
   createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
   updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
-  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  plants       Plant[]
-  fiscalYears  FiscalYear[]
-  glAccounts   GlAccount[]
-  numberSeries NumberSeries[]
-  journals     JournalEntry[]
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  plants         Plant[]
+  fiscalYears    FiscalYear[]
+  glAccounts     GlAccount[]
+  numberSeries   NumberSeries[]
+  journals       JournalEntry[]
+  purchaseOrders PurchaseOrder[]
+  goodsReceipts  GoodsReceipt[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -76,10 +78,13 @@ model Plant {
   createdAt DateTime @default(now()) @db.Timestamptz(6) @map("created_at")
   updatedAt DateTime @updatedAt @db.Timestamptz(6) @map("updated_at")
 
-  legalEntity LegalEntity          @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
-  warehouses  Warehouse[]
-  valuations  ItemPlantValuation[]
-  ledger      StockLedgerEntry[]
+  legalEntity    LegalEntity          @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  warehouses     Warehouse[]
+  valuations     ItemPlantValuation[]
+  ledger         StockLedgerEntry[]
+  purchaseOrders PurchaseOrder[]
+  gateEvents     GateEvent[]
+  goodsReceipts  GoodsReceipt[]
 
   @@unique([tenantId, code])
   @@index([tenantId, legalEntityId])
@@ -122,6 +127,7 @@ model StorageLocation {
   warehouse Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   balances  StockBalance[]
   ledger    StockLedgerEntry[]
+  grnLines  GoodsReceiptLine[]
 
   @@unique([tenantId, warehouseId, code])
   @@index([tenantId, warehouseId])
@@ -286,6 +292,8 @@ model Item {
   stockUnits   StockUnit[]
   valuations   ItemPlantValuation[]
   ledger       StockLedgerEntry[]
+  poLines      PurchaseOrderLine[]
+  grnLines     GoodsReceiptLine[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -349,6 +357,7 @@ model StockUnit {
   ledger    StockLedgerEntry[]
   parents   StockUnitLink[]    @relation("LinkChild")
   children  StockUnitLink[]    @relation("LinkParent")
+  grnLines  GoodsReceiptLine[]
 
   @@unique([tenantId, itemId, reference])
   @@index([tenantId, itemId])
@@ -673,4 +682,292 @@ model IdempotencyKey {
   @@unique([tenantId, source, externalRef])
   @@index([tenantId, createdAt])
   @@map("idempotency_key")
+}
+
+// ───────────────────────────── procure to pay ─────────────────────────────
+
+enum PartyType {
+  SUPPLIER
+  CUSTOMER
+  BOTH
+}
+
+model Party {
+  id       String    @id @default(uuid(7)) @db.Uuid
+  tenantId String    @db.Uuid @map("tenant_id")
+  code     String
+  name     String
+  type     PartyType
+  taxRegistrationNo String? @map("tax_registration_no")
+  isActive Boolean   @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  purchaseOrders PurchaseOrder[]
+  goodsReceipts  GoodsReceipt[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("party")
+}
+
+enum PurchaseOrderState {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  RELEASED
+  CLOSED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id            String @id @default(uuid(7)) @db.Uuid
+  tenantId      String @db.Uuid @map("tenant_id")
+  legalEntityId String @db.Uuid @map("legal_entity_id")
+  plantId       String @db.Uuid @map("plant_id")
+
+  documentNo String             @map("document_no")
+  supplierId String             @db.Uuid @map("supplier_id")
+  state      PurchaseOrderState @default(DRAFT)
+
+  orderDate   DateTime @map("order_date") @db.Date
+  totalAmount Decimal  @default(0) @map("total_amount") @db.Decimal(18, 2)
+  currency    String   @default("INR") @db.Char(3)
+
+  /// Who moved it into PENDING_APPROVAL. Maker-checker needs this, and it must
+  /// be the submitter, not the creator — they can differ.
+  submittedById String?   @db.Uuid @map("submitted_by_id")
+  submittedAt   DateTime? @map("submitted_at") @db.Timestamptz(6)
+
+  /// Optimistic locking. Two buyers editing the same order must not silently
+  /// overwrite each other.
+  version   Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  legalEntity   LegalEntity         @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  plant         Plant               @relation(fields: [plantId], references: [id], onDelete: Restrict)
+  supplier      Party               @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  lines         PurchaseOrderLine[]
+  goodsReceipts GoodsReceipt[]
+  gateEvents    GateEvent[]
+
+  @@unique([tenantId, legalEntityId, documentNo])
+  @@index([tenantId, plantId, state])
+  @@index([tenantId, supplierId])
+  @@map("purchase_order")
+}
+
+model PurchaseOrderLine {
+  id              String @id @default(uuid(7)) @db.Uuid
+  tenantId        String @db.Uuid @map("tenant_id")
+  purchaseOrderId String @db.Uuid @map("purchase_order_id")
+  lineNo          Int    @map("line_no")
+
+  itemId   String  @db.Uuid @map("item_id")
+  /// Ordered quantity in the item's base UoM.
+  quantity Decimal @db.Decimal(18, 6)
+  /// Dual-UoM items: the expected second quantity. Captured at receipt, not derived.
+  secondaryQuantity Decimal? @map("secondary_quantity") @db.Decimal(18, 6)
+
+  rate   Decimal @db.Decimal(18, 6)
+  amount Decimal @db.Decimal(18, 2)
+
+  /// Maintained as receipts post, so over-receipt can be refused.
+  receivedQuantity Decimal @default(0) @map("received_quantity") @db.Decimal(18, 6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  purchaseOrder PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  item          Item               @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  grnLines      GoodsReceiptLine[]
+
+  @@unique([tenantId, purchaseOrderId, lineNo])
+  @@index([tenantId, itemId])
+  @@map("purchase_order_line")
+}
+
+/// Approval thresholds (gap 11). Bands are [minAmount, maxAmount) so they cannot overlap.
+model ApprovalRule {
+  id           String  @id @default(uuid(7)) @db.Uuid
+  tenantId     String  @db.Uuid @map("tenant_id")
+  documentType String  @map("document_type")
+  minAmount    Decimal @map("min_amount") @db.Decimal(18, 2)
+  maxAmount    Decimal? @map("max_amount") @db.Decimal(18, 2)
+  plantId      String? @db.Uuid @map("plant_id")
+  category     String?
+  permission   String
+  sequence     Int
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  approvals ApprovalRecord[]
+
+  @@index([tenantId, documentType])
+  @@map("approval_rule")
+}
+
+/// Append-only: an approval is a fact about who decided what, and when.
+model ApprovalRecord {
+  id           String @id @default(uuid(7)) @db.Uuid
+  tenantId     String @db.Uuid @map("tenant_id")
+  documentType String @map("document_type")
+  documentId   String @db.Uuid @map("document_id")
+  ruleId       String @db.Uuid @map("rule_id")
+  approvedById String @db.Uuid @map("approved_by_id")
+  comment      String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  rule ApprovalRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, documentType, documentId, ruleId])
+  @@index([tenantId, documentType, documentId])
+  @@map("approval_record")
+}
+
+// ───────────────────────────── gate & weighbridge ─────────────────────────────
+
+enum GateDirection {
+  IN
+  OUT
+}
+
+/// Append-only: a gate event is an immutable record of something that physically
+/// happened. Corrections are a new event, never an edit.
+model GateEvent {
+  id       String        @id @default(uuid(7)) @db.Uuid
+  tenantId String        @db.Uuid @map("tenant_id")
+  plantId  String        @db.Uuid @map("plant_id")
+  direction GateDirection
+
+  vehicleNo  String  @map("vehicle_no")
+  driverName String? @map("driver_name")
+  /// The business document the vehicle is here for, when known at the gate.
+  purchaseOrderId String? @db.Uuid @map("purchase_order_id")
+
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+  /// The scanner or terminal's own reference. Unique per source so a double-tap
+  /// or a retry cannot create a second event (gap 8).
+  deviceSource String @map("device_source")
+  deviceRef    String @map("device_ref")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  plant         Plant               @relation(fields: [plantId], references: [id], onDelete: Restrict)
+  purchaseOrder PurchaseOrder?      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  weighbridge   WeighbridgeTicket[]
+  goodsReceipts GoodsReceipt[]
+
+  @@unique([tenantId, deviceSource, deviceRef])
+  @@index([tenantId, plantId, occurredAt])
+  @@index([tenantId, vehicleNo])
+  @@map("gate_event")
+}
+
+/// Append-only. Weighbridges resend over flaky serial links, so the device
+/// reference is the idempotency key.
+model WeighbridgeTicket {
+  id          String @id @default(uuid(7)) @db.Uuid
+  tenantId    String @db.Uuid @map("tenant_id")
+  gateEventId String @db.Uuid @map("gate_event_id")
+
+  grossWeight Decimal @map("gross_weight") @db.Decimal(18, 3)
+  tareWeight  Decimal @map("tare_weight") @db.Decimal(18, 3)
+  /// Stored, not computed on read: the scale is the source of truth and a later
+  /// change to gross or tare must not silently restate a historical net.
+  netWeight   Decimal @map("net_weight") @db.Decimal(18, 3)
+  weighedAt   DateTime @map("weighed_at") @db.Timestamptz(6)
+
+  deviceSource String @map("device_source")
+  deviceRef    String @map("device_ref")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  gateEvent GateEvent @relation(fields: [gateEventId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, deviceSource, deviceRef])
+  @@index([tenantId, gateEventId])
+  @@map("weighbridge_ticket")
+}
+
+// ───────────────────────────── goods receipt ─────────────────────────────
+
+enum GoodsReceiptState {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+model GoodsReceipt {
+  id            String @id @default(uuid(7)) @db.Uuid
+  tenantId      String @db.Uuid @map("tenant_id")
+  legalEntityId String @db.Uuid @map("legal_entity_id")
+  plantId       String @db.Uuid @map("plant_id")
+
+  documentNo      String            @map("document_no")
+  purchaseOrderId String            @db.Uuid @map("purchase_order_id")
+  supplierId      String            @db.Uuid @map("supplier_id")
+  state           GoodsReceiptState @default(DRAFT)
+
+  /// The business date the movement belongs to. The fiscal period is resolved
+  /// from this, never from createdAt (ADR 0007).
+  postingDate DateTime @map("posting_date") @db.Date
+
+  gateEventId String? @db.Uuid @map("gate_event_id")
+
+  /// A posted receipt is reversed, never edited (CLAUDE.md invariant 2).
+  reversedById   String? @db.Uuid @map("reversed_by_id")
+  reversesGrnId  String? @db.Uuid @map("reverses_grn_id")
+
+  version   Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  legalEntity   LegalEntity        @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  plant         Plant              @relation(fields: [plantId], references: [id], onDelete: Restrict)
+  purchaseOrder PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  supplier      Party              @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  gateEvent     GateEvent?         @relation(fields: [gateEventId], references: [id], onDelete: Restrict)
+  lines         GoodsReceiptLine[]
+
+  @@unique([tenantId, legalEntityId, documentNo])
+  @@index([tenantId, plantId, state, postingDate])
+  @@index([tenantId, purchaseOrderId])
+  @@map("goods_receipt")
+}
+
+model GoodsReceiptLine {
+  id             String @id @default(uuid(7)) @db.Uuid
+  tenantId       String @db.Uuid @map("tenant_id")
+  goodsReceiptId String @db.Uuid @map("goods_receipt_id")
+  lineNo         Int    @map("line_no")
+
+  purchaseOrderLineId String @db.Uuid @map("purchase_order_line_id")
+  itemId              String @db.Uuid @map("item_id")
+  stockUnitId         String @db.Uuid @map("stock_unit_id")
+  storageLocationId   String @db.Uuid @map("storage_location_id")
+
+  quantity Decimal @db.Decimal(18, 6)
+  /// Measured at the weighbridge or the scale, never derived from the first
+  /// quantity (ADR 0004).
+  secondaryQuantity Decimal? @map("secondary_quantity") @db.Decimal(18, 6)
+
+  unitCost Decimal @map("unit_cost") @db.Decimal(18, 6)
+  amount   Decimal @db.Decimal(18, 2)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  goodsReceipt      GoodsReceipt      @relation(fields: [goodsReceiptId], references: [id], onDelete: Restrict)
+  purchaseOrderLine PurchaseOrderLine @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)
+  item              Item              @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  stockUnit         StockUnit         @relation(fields: [stockUnitId], references: [id], onDelete: Restrict)
+  storageLocation   StorageLocation   @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, goodsReceiptId, lineNo])
+  @@index([tenantId, purchaseOrderLineId])
+  @@map("goods_receipt_line")
 }

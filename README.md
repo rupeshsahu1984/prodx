@@ -93,11 +93,18 @@ passwords, permissions, JWT, auth middleware, permission guard) and 20 integrati
 - a connection that never set a tenant sees **zero rows**, not the whole table
 - one tenant cannot read, update or delete another tenant's row **even knowing its exact id**
 - an insert carrying another tenant's id is rejected by the policy's `WITH CHECK`
-- every one of the 26 tenant-scoped tables carries an enabled, forced policy
+- every one of the 35 tenant-scoped tables carries an enabled, forced policy
 - the stock ledger, genealogy, journal and audit tables reject `UPDATE` and `DELETE`
   **even for the owning role**
 - 25 concurrent allocations produce distinct, contiguous document numbers, and a rolled-back
   transaction returns its number rather than burning it
+- posting a goods receipt moves stock, revalues the item, writes a balanced journal, consumes
+  purchase-order quantity and queues an outbox message — atomically
+- **reversal restores stock, valuation and order quantity exactly**, leaving the original
+  entries in place
+- a refused posting — closed period, missing permission, over-receipt, double-post — leaves
+  **no partial state at all**
+- one tenant cannot post another tenant's receipt even with its exact id
 
 The integration suite deliberately **fails** rather than skipping when no database is present.
 
