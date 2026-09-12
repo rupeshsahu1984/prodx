@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Clickable PRODX Textile and Carton Manufacturing ERP prototype">
+  <title>PRODX Manufacturing ERP Prototype</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><span class="brand-mark">P</span><div><strong>PRODX</strong><small>Manufacturing ERP</small></div></div>
+      <button class="menu-close" id="menuClose" aria-label="Close menu">×</button>
+      <div class="plant-card"><span class="status-dot"></span><div><strong>Plant 01</strong><small>Textile + Carton Demo</small></div><span>⌄</span></div>
+      <label class="menu-search"><span>⌕</span><input id="menuSearch" placeholder="Search all menus..." aria-label="Search menus"></label>
+      <nav id="mainNav" aria-label="Main menu"></nav>
+      <div class="sidebar-footer"><div class="avatar">AD</div><div><strong>Admin User</strong><small>Product Prototype</small></div><button title="Settings">⚙</button></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="hamburger" id="menuOpen" aria-label="Open menu">☰</button>
+        <div class="breadcrumbs" id="breadcrumbs">Home / Executive Dashboard</div>
+        <label class="role-switcher">Role <select id="roleSelect"><option>Plant Head</option><option>Security Officer</option><option>Sales Manager</option><option>Purchase Manager</option><option>Store Executive</option><option>Production Supervisor</option><option>Quality Inspector</option><option>HR Manager</option><option>Accountant</option></select></label>
+        <div class="top-actions">
+          <button title="Global search">⌕</button><button title="Tasks">✓<b>8</b></button><button title="Alerts">♢<b>3</b></button><button title="Help">?</button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <div class="page-head">
+          <div><span class="eyebrow" id="pageGroup">HOME & CONTROL TOWER</span><h1 id="pageTitle">Executive Dashboard</h1><p id="pageDescription"></p></div>
+          <div class="head-actions" id="headActions"><button class="btn secondary" id="exportBtn">⇩ Export</button><button class="btn primary" id="newBtn">＋ New Record</button></div>
+        </div>
+
+        <div class="view-tabs" role="tablist">
+          <button class="tab" data-view="journey">Process Journey</button>
+          <button class="tab active" data-view="list">List / Grid</button>
+          <button class="tab" data-view="form">Create / Edit Form</button>
+          <button class="tab" data-view="detail">Record Detail</button>
+          <button class="tab" data-view="approval">Approval</button>
+          <button class="tab" data-view="controls">Controls & Posting</button>
+          <button class="tab" data-view="audit">Audit Trail</button>
+        </div>
+
+        <section id="journeyView" class="view"><div id="journeyContent"></div></section>
+        <section id="listView" class="view active">
+          <div class="metric-grid" id="metricGrid"></div>
+          <div class="panel">
+            <div class="panel-toolbar">
+              <div class="segmented"><button class="active">All</button><button>Open</button><button>Pending</button><button>Closed</button></div>
+              <div class="toolbar-actions"><label class="table-search">⌕ <input id="recordSearch" placeholder="Search records"></label><button>☷ Filter</button><button>⚙ Columns</button></div>
+            </div>
+            <div class="table-wrap"><table><thead id="gridHead"></thead><tbody id="gridBody"></tbody></table></div>
+            <div class="table-footer"><span id="resultCount">0 records</span><div><button>‹</button><button class="active">1</button><button>2</button><button>3</button><button>›</button></div></div>
+          </div>
+        </section>
+
+        <section id="formView" class="view">
+          <form class="form-layout" id="recordForm">
+            <div class="form-main">
+              <div class="panel form-section"><div class="section-title"><div><h2>Basic Information</h2><p>Required fields are marked with an asterisk.</p></div><span class="chip draft">Draft</span></div><div class="form-grid" id="basicFields"></div></div>
+              <div class="panel form-section"><div class="section-title"><div><h2 id="technicalTitle">Technical & Commercial Details</h2><p>Fields adapt to the selected manufacturing process.</p></div></div><div class="form-grid" id="technicalFields"></div></div>
+              <div class="panel form-section"><div class="section-title"><div><h2 id="lineSectionTitle">Lines / Components</h2><p>Add page-specific materials, operations, specifications or schedule lines.</p></div><button type="button" class="btn secondary small" id="addLine">＋ Add Line</button></div><div class="table-wrap compact"><table><thead id="lineHead"></thead><tbody id="lineItems"></tbody></table></div></div>
+              <div class="form-actions"><button type="button" class="btn secondary">Cancel</button><button type="button" class="btn secondary" id="saveDraft">Save Draft</button><button type="submit" class="btn primary">Submit for Approval</button></div>
+            </div>
+            <aside class="form-side">
+              <div class="panel side-card"><h3>Workflow</h3><ol class="stepper" id="formWorkflow"></ol></div>
+              <div class="panel side-card"><h3>Attachments</h3><button type="button" class="dropzone">＋<b>Upload document</b><small>PDF, XLSX, image up to 10 MB</small></button></div>
+              <div class="panel side-card"><h3>Control checks</h3><ul class="check-list"><li>✓ Role and plant scope</li><li>✓ Duplicate validation</li><li>✓ Effective date</li><li>○ Approval threshold</li><li>○ Posting readiness</li></ul></div>
+            </aside>
+          </form>
+        </section>
+
+        <section id="detailView" class="view"><div id="detailContent"></div></section>
+        <section id="approvalView" class="view"><div id="approvalContent"></div></section>
+        <section id="controlsView" class="view"><div id="controlsContent"></div></section>
+        <section id="auditView" class="view"><div id="auditContent"></div></section>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast"><span>✓</span><div><b>Saved successfully</b><small>Prototype data was updated locally.</small></div></div>
+  <div class="mobile-overlay" id="mobileOverlay"></div>
+  <script src="data.js"></script>
+  <script src="schemas.js"></script>
+  <script src="app.js"></script>
+  <script src="journeys.js"></script>
+</body>
+</html>
