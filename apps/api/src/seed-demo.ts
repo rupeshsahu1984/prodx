@@ -98,7 +98,10 @@ async function main(): Promise<void> {
         },
         {
           id: id.roleStores, tenantId, code: 'STORE_EXECUTIVE', name: 'Store Executive',
-          permissions: ['purchase_order:read', 'goods_receipt:read', 'goods_receipt:post', 'stock:read'],
+          permissions: [
+            'purchase_order:read', 'goods_receipt:read', 'goods_receipt:post', 'stock:read',
+            'gate:read', 'gate:in', 'gate:weigh', 'gate:out',
+          ],
         },
       ],
     })

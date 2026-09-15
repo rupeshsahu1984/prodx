@@ -116,3 +116,8 @@ input:focus,select:focus{outline:2px solid var(--teal);outline-offset:-1px;borde
 .band{display:inline-block;padding:2px 8px;border-radius:4px;background:#eef4f5;
   font-family:ui-monospace,monospace;font-size:11.5px;font-weight:700;color:var(--navy)}
 @media(max-width:700px){.trimform{grid-template-columns:1fr}}
+
+.gatebar{display:flex;gap:12px;align-items:end;padding:14px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.gatebar label{font-size:12px;color:var(--muted);margin:0}
+.gatebar input{margin-top:5px;width:170px;font-family:ui-monospace,monospace}
+@media(max-width:600px){.gatebar input{width:100%}}

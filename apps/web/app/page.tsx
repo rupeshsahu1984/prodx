@@ -33,7 +33,7 @@ const DOMAINS: { name: string; modules: number; live?: number; perm?: string }[]
   { name: 'Reports, AI & Administration', modules: 10 },
 ]
 interface Line { id: string; lineNo: number; quantity: string; receivedQuantity: string; rate: string; amount: string; item: { code: string; name: string } }
-interface PO { id: string; documentNo: string; state: string; totalAmount: string; supplier: { name: string }; plant: { code: string }; lines: Line[] }
+interface PO { id: string; plantId: string; documentNo: string; state: string; totalAmount: string; supplier: { name: string }; plant: { code: string }; lines: Line[] }
 interface GRN { id: string; documentNo: string; state: string; postingDate: string; purchaseOrder: { documentNo: string }; lines: { id: string; quantity: string; amount: string; item: { code: string } }[] }
 interface Stock {
   balances: { id: string; quantity: string; stockUnit: { reference: string; item: { code: string; name: string } }; storageLocation: { code: string } }[]
@@ -52,6 +52,11 @@ interface DyeLot { id: string; documentNo: string; colourCode: string; shadeBand
 interface FabricSpec { id: string; gsm: number; widthInch: string; construction: string | null; item: { code: string; name: string } }
 interface TrimSlot { orderId: string; ups: number }
 interface TrimPattern { combination: TrimSlot[]; usedMm: number; trimMm: number; trimPct: number; runMetres: number }
+interface Weighment { gross: number; tare: number; net: number }
+interface InsideVehicle {
+  gateEventId: string; vehicleNo: string; driverName: string | null; plant: string
+  purchaseOrder: string | null; occurredAt: string; minutesInside: number; weighments: Weighment[]
+}
 interface TrimResult { deckleMm: number; patterns: TrimPattern[]; averageTrimPct: number; totalMetres: number; unfulfilled: { orderId: string; remainingMetres: number }[] }
 interface Journal { id: string; documentNo: string; narration: string | null; sourceType: string; lines: JournalLine[] }
 
@@ -72,6 +77,9 @@ export default function Page() {
   const [dyeLots, setDyeLots] = useState<DyeLot[]>([])
   const [fabrics, setFabrics] = useState<FabricSpec[]>([])
   const [trim, setTrim] = useState<TrimResult | null>(null)
+  const [inside, setInside] = useState<InsideVehicle[]>([])
+  const [gateVehicle, setGateVehicle] = useState('MH12AB1234')
+  const [gateDriver, setGateDriver] = useState('R. Kumar')
   const [deckle, setDeckle] = useState('1600')
   const [trimOrders, setTrimOrders] = useState('780 x 1000\n790 x 1000\n650 x 400')
   const [error, setError] = useState('')
@@ -101,10 +109,11 @@ export default function Page() {
   const load = useCallback(async () => {
     if (token === null) return
     try {
-      const [meRes, poRes, grnRes, stockRes, jRes, packRes, navRes] = await Promise.all([
+      const [meRes, poRes, grnRes, stockRes, jRes, packRes, navRes, insideRes] = await Promise.all([
         call('/me'), call('/purchase-orders'), call('/goods-receipts'), call('/stock/balances'),
-        call('/journal'), call('/packs'), call('/packs/navigation'),
+        call('/journal'), call('/packs'), call('/packs/navigation'), call('/gate/inside'),
       ])
+      setInside(insideRes as InsideVehicle[])
       setMe(meRes as Me); setPos(poRes as PO[]); setGrns(grnRes as GRN[])
       setStock(stockRes as Stock); setJournal(jRes as Journal[])
       setPacks(packRes as Pack[]); setPackNav(navRes as NavEntry[]); setError('')
@@ -132,6 +141,16 @@ export default function Page() {
     try { sessionStorage.removeItem('prodx.token') } catch { /* ignore */ }
     setToken(null); setMe(null)
   }
+
+  /**
+   * Every gate call carries a device reference. A real scanner sends its own;
+   * the browser stands in for one here, and a fresh reference each click is
+   * what makes the retry behaviour visible rather than hidden.
+   */
+  const deviceRef = () => ({
+    deviceSource: 'WEB_GATE_TERMINAL',
+    deviceRef: `WEB-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  })
 
   async function runTrim() {
     // "780 x 1000" — width in millimetres, metres required.
@@ -316,6 +335,91 @@ export default function Page() {
                 ))}
               </tbody>
             </table>
+          )}
+        </section>
+
+        <section className="panel">
+          <div className="phead">
+            <div>
+              <h2>Gate &amp; weighbridge</h2>
+              <small>
+                Every call carries the device&apos;s own reference and is idempotent on it —
+                a scanner double-tap or a weighbridge resend cannot create a second event
+              </small>
+            </div>
+          </div>
+
+          <div className="gatebar">
+            <label htmlFor="veh">Vehicle
+              <input id="veh" value={gateVehicle} onChange={(e) => setGateVehicle(e.target.value)} />
+            </label>
+            <label htmlFor="drv">Driver
+              <input id="drv" value={gateDriver} onChange={(e) => setGateDriver(e.target.value)} />
+            </label>
+            <button className="btn primary" disabled={busy}
+              onClick={() => act(() => call('/gate/in', {
+                method: 'POST',
+                body: JSON.stringify({
+                  ...deviceRef(), vehicleNo: gateVehicle, driverName: gateDriver,
+                  plantId: pos[0]?.plantId ?? '', purchaseOrderId: pos[0]?.id,
+                }),
+              }), `${gateVehicle} recorded at the gate.`)}>
+              Gate in
+            </button>
+          </div>
+
+          {inside.length === 0 ? (
+            <div className="empty">No vehicles inside. Record a gate entry above.</div>
+          ) : (
+            <div className="tscroll"><table>
+              <thead><tr>
+                <th>Vehicle</th><th>Against</th><th className="num">Inside</th>
+                <th>Weighments</th><th></th>
+              </tr></thead>
+              <tbody>
+                {inside.map((v) => (
+                  <tr key={v.gateEventId}>
+                    <td><b className="code">{v.vehicleNo}</b>{v.driverName !== null && <><br /><small style={{ color: 'var(--muted)' }}>{v.driverName}</small></>}</td>
+                    <td>{v.purchaseOrder ?? <small style={{ color: 'var(--muted)' }}>no order</small>}</td>
+                    <td className="num">
+                      <span style={{ color: v.minutesInside > 120 ? 'var(--red)' : 'inherit' }}>
+                        {v.minutesInside} min
+                      </span>
+                    </td>
+                    <td>
+                      {v.weighments.length === 0
+                        ? <small style={{ color: 'var(--muted)' }}>not weighed</small>
+                        : v.weighments.map((w, i) => (
+                            <div key={i}><small>gross {w.gross.toLocaleString('en-IN')} · tare {w.tare.toLocaleString('en-IN')} · <b>net {w.net.toLocaleString('en-IN')} kg</b></small></div>
+                          ))}
+                    </td>
+                    <td>
+                      <div className="pactions">
+                        <button className="btn" disabled={busy}
+                          onClick={() => act(() => call('/gate/weigh', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                              ...deviceRef(), gateEventId: v.gateEventId,
+                              grossWeight: 18500, tareWeight: 7200,
+                            }),
+                          }), 'Weighment recorded — net 11,300 kg.')}>
+                          Weigh
+                        </button>
+                        <button className="btn" disabled={busy}
+                          onClick={() => act(() => call('/gate/out', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                              ...deviceRef(), vehicleNo: v.vehicleNo, plantId: pos[0]?.plantId ?? '',
+                            }),
+                          }), `${v.vehicleNo} cleared the gate.`)}>
+                          Gate out
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
           )}
         </section>
 

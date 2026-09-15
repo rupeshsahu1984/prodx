@@ -152,6 +152,12 @@ passwords, permissions, JWT, auth middleware, permission guard) and 20 integrati
 - a refused posting — closed period, missing permission, over-receipt, double-post — leaves
   **no partial state at all**
 - one tenant cannot post another tenant's receipt even with its exact id
+- a gate scanner double-tap and a weighbridge resend each produce **one** event, and two
+  simultaneous retries still produce one
+- the same device reference with a *different* payload is refused with 409, not replayed —
+  replaying it would silently discard a real event
+- a vehicle that entered against a purchase order **cannot leave** until the goods receipt is
+  posted
 
 The integration suite deliberately **fails** rather than skipping when no database is present.
 
