@@ -46,6 +46,13 @@ interface Pack {
   moduleCount: number; permissionCount: number; rowCount: number
 }
 interface NavEntry { group: string; label: string; path: string; permission: string }
+interface Tool { id: string; code: string; name: string; toolType: string; customerOwned: boolean; currentImpressions: number; lifeLimit: number | null; lifeUsedPct: number | null }
+interface BoardSpec { id: string; gsm: number; burstFactor: string | null; deckleMm: number; item: { code: string; name: string } }
+interface DyeLot { id: string; documentNo: string; colourCode: string; shadeBand: string; labDipRef: string | null; lotDate: string }
+interface FabricSpec { id: string; gsm: number; widthInch: string; construction: string | null; item: { code: string; name: string } }
+interface TrimSlot { orderId: string; ups: number }
+interface TrimPattern { combination: TrimSlot[]; usedMm: number; trimMm: number; trimPct: number; runMetres: number }
+interface TrimResult { deckleMm: number; patterns: TrimPattern[]; averageTrimPct: number; totalMetres: number; unfulfilled: { orderId: string; remainingMetres: number }[] }
 interface Journal { id: string; documentNo: string; narration: string | null; sourceType: string; lines: JournalLine[] }
 
 const money = (v: string) => `₹ ${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
@@ -60,6 +67,13 @@ export default function Page() {
   const [journal, setJournal] = useState<Journal[]>([])
   const [packs, setPacks] = useState<Pack[]>([])
   const [packNav, setPackNav] = useState<NavEntry[]>([])
+  const [tools, setTools] = useState<Tool[]>([])
+  const [boards, setBoards] = useState<BoardSpec[]>([])
+  const [dyeLots, setDyeLots] = useState<DyeLot[]>([])
+  const [fabrics, setFabrics] = useState<FabricSpec[]>([])
+  const [trim, setTrim] = useState<TrimResult | null>(null)
+  const [deckle, setDeckle] = useState('1600')
+  const [trimOrders, setTrimOrders] = useState('780 x 1000\n790 x 1000\n650 x 400')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
@@ -94,6 +108,18 @@ export default function Page() {
       setMe(meRes as Me); setPos(poRes as PO[]); setGrns(grnRes as GRN[])
       setStock(stockRes as Stock); setJournal(jRes as Journal[])
       setPacks(packRes as Pack[]); setPackNav(navRes as NavEntry[]); setError('')
+
+      // Pack data is fetched only when the pack is on. A disabled pack would
+      // return PACK_NOT_INSTALLED, and one failing request must not blank the page.
+      const live = (packRes as Pack[]).filter((p) => p.state === 'INSTALLED').map((p) => p.id)
+      if (live.includes('carton')) {
+        const [t, b] = await Promise.all([call('/carton/tooling'), call('/carton/board-specs')])
+        setTools(t as Tool[]); setBoards(b as BoardSpec[])
+      } else { setTools([]); setBoards([]); setTrim(null) }
+      if (live.includes('textile')) {
+        const [d, f] = await Promise.all([call('/textile/dye-lots'), call('/textile/fabric-specs')])
+        setDyeLots(d as DyeLot[]); setFabrics(f as FabricSpec[])
+      } else { setDyeLots([]); setFabrics([]) }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       if (String(e).includes('401') || String(e).includes('valid')) signOut()
@@ -105,6 +131,25 @@ export default function Page() {
   function signOut() {
     try { sessionStorage.removeItem('prodx.token') } catch { /* ignore */ }
     setToken(null); setMe(null)
+  }
+
+  async function runTrim() {
+    // "780 x 1000" — width in millimetres, metres required.
+    const orders = trimOrders.split('\n').map((line, i) => {
+      const [w, m] = line.split(/[x×,]/).map((part) => Number(part.trim()))
+      return { id: `ORD-${i + 1}`, widthMm: w ?? 0, requiredMetres: m ?? 0 }
+    }).filter((o) => o.widthMm > 0 && o.requiredMetres > 0)
+
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const result = await call('/carton/trim-plans/simulate', {
+        method: 'POST',
+        body: JSON.stringify({ deckleMm: Number(deckle), orders }),
+      })
+      setTrim(result as TrimResult)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally { setBusy(false) }
   }
 
   async function act(fn: () => Promise<unknown>, message: string) {
@@ -273,6 +318,134 @@ export default function Page() {
             </table>
           )}
         </section>
+
+        {tools.length + boards.length > 0 && (
+          <section className="panel">
+            <div className="phead">
+              <div>
+                <h2>Corrugated carton</h2>
+                <small>From the carton pack — these tables and screens disappear if it is disabled</small>
+              </div>
+            </div>
+            <div className="tscroll"><table>
+              <thead><tr><th>Board</th><th className="num">GSM</th><th className="num">BF</th><th className="num">Deckle</th></tr></thead>
+              <tbody>
+                {boards.map((b) => (
+                  <tr key={b.id}>
+                    <td><b>{b.item.code}</b><br /><small style={{ color: 'var(--muted)' }}>{b.item.name}</small></td>
+                    <td className="num">{b.gsm}</td>
+                    <td className="num">{b.burstFactor ?? '—'}</td>
+                    <td className="num">{b.deckleMm} mm</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+            <div className="tscroll"><table>
+              <thead><tr><th>Tool</th><th>Type</th><th className="num">Impressions</th><th className="num">Life used</th></tr></thead>
+              <tbody>
+                {tools.map((t) => (
+                  <tr key={t.id}>
+                    <td><b>{t.code}</b><br /><small style={{ color: 'var(--muted)' }}>{t.name}</small></td>
+                    <td>{t.toolType.replace(/_/g, ' ').toLowerCase()}{t.customerOwned && <><br /><small>customer owned</small></>}</td>
+                    <td className="num">{t.currentImpressions.toLocaleString('en-IN')}{t.lifeLimit !== null && <> / {t.lifeLimit.toLocaleString('en-IN')}</>}</td>
+                    <td className="num">
+                      {t.lifeUsedPct === null ? '—' : (
+                        <span style={{ color: t.lifeUsedPct > 80 ? 'var(--red)' : 'inherit', fontWeight: t.lifeUsedPct > 80 ? 700 : 400 }}>
+                          {t.lifeUsedPct}%
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+
+            <div className="trim">
+              <h3>Corrugator trim planner</h3>
+              <p>
+                Combining orders across the deck is where the money is. One line per order:
+                <code> width × metres</code>.
+              </p>
+              <div className="trimform">
+                <label htmlFor="deckle">Deckle (mm)
+                  <input id="deckle" value={deckle} onChange={(e) => setDeckle(e.target.value)} />
+                </label>
+                <label htmlFor="orders">Orders
+                  <textarea id="orders" rows={4} value={trimOrders} onChange={(e) => setTrimOrders(e.target.value)} />
+                </label>
+                <button className="btn primary" disabled={busy} onClick={() => void runTrim()}>
+                  {busy ? 'Planning…' : 'Run optimiser'}
+                </button>
+              </div>
+              {trim !== null && (
+                <div className="trimout">
+                  <div className="kpis" style={{ marginBottom: 12 }}>
+                    <div className="kpi"><small>Weighted trim</small><b>{trim.averageTrimPct}%</b></div>
+                    <div className="kpi"><small>Set-ups</small><b>{trim.patterns.length}</b></div>
+                    <div className="kpi"><small>Metres planned</small><b>{trim.totalMetres.toLocaleString('en-IN')}</b></div>
+                  </div>
+                  <table>
+                    <thead><tr><th>Lay-up</th><th className="num">Used</th><th className="num">Trim</th><th className="num">Run</th></tr></thead>
+                    <tbody>
+                      {trim.patterns.map((p, i) => (
+                        <tr key={i}>
+                          <td>{p.combination.map((c) => `${c.orderId} ×${c.ups}`).join('  +  ')}</td>
+                          <td className="num">{p.usedMm} mm</td>
+                          <td className="num">{p.trimMm} mm ({p.trimPct}%)</td>
+                          <td className="num">{p.runMetres.toLocaleString('en-IN')} m</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {trim.unfulfilled.length > 0 && (
+                    <div className="warn">
+                      Not coverable within the trim limit:{' '}
+                      {trim.unfulfilled.map((u) => `${u.orderId} (${u.remainingMetres} m)`).join(', ')}.
+                      The planner says so rather than reporting a plan that leaves them short.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {dyeLots.length + fabrics.length > 0 && (
+          <section className="panel">
+            <div className="phead">
+              <div>
+                <h2>Textile &amp; garment</h2>
+                <small>From the textile pack — shade band is what allocation has to respect</small>
+              </div>
+            </div>
+            <div className="tscroll"><table>
+              <thead><tr><th>Fabric</th><th className="num">GSM</th><th className="num">Width</th><th>Construction</th></tr></thead>
+              <tbody>
+                {fabrics.map((f) => (
+                  <tr key={f.id}>
+                    <td><b>{f.item.code}</b><br /><small style={{ color: 'var(--muted)' }}>{f.item.name}</small></td>
+                    <td className="num">{f.gsm}</td>
+                    <td className="num">{f.widthInch}"</td>
+                    <td>{f.construction ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+            <div className="tscroll"><table>
+              <thead><tr><th>Dye lot</th><th>Colour</th><th>Shade band</th><th>Lab dip</th></tr></thead>
+              <tbody>
+                {dyeLots.map((d) => (
+                  <tr key={d.id}>
+                    <td className="code">{d.documentNo}</td>
+                    <td>{d.colourCode}</td>
+                    <td><span className="band">{d.shadeBand}</span></td>
+                    <td>{d.labDipRef ?? <span style={{ color: 'var(--red)' }}>not approved</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+          </section>
+        )}
 
         <section className="panel">
           <div className="phead">
