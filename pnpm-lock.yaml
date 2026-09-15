@@ -41,6 +41,15 @@ importers:
       '@prodx/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@prodx/pack-carton':
+        specifier: workspace:*
+        version: link:../../packs/carton
+      '@prodx/pack-sdk':
+        specifier: workspace:*
+        version: link:../../packages/pack-sdk
+      '@prodx/pack-textile':
+        specifier: workspace:*
+        version: link:../../packs/textile
       decimal.js:
         specifier: ^10.4.3
         version: 10.6.0
@@ -182,6 +191,45 @@ importers:
       prisma:
         specifier: ^6.2.1
         version: 6.19.3(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.2)(terser@5.51.2)
+
+  packages/pack-sdk:
+    dependencies:
+      '@prodx/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.2)(terser@5.51.2)
+
+  packs/carton:
+    dependencies:
+      '@prodx/pack-sdk':
+        specifier: workspace:*
+        version: link:../../packages/pack-sdk
+    devDependencies:
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.2)(terser@5.51.2)
+
+  packs/textile:
+    dependencies:
+      '@prodx/pack-sdk':
+        specifier: workspace:*
+        version: link:../../packages/pack-sdk
+    devDependencies:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3

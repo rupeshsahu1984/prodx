@@ -7,55 +7,29 @@
  * always the same and a broken experiment costs nothing.
  */
 import { hashPassword } from '@prodx/core'
-import { ALL_PLANTS, prisma, withTenantTransaction } from '@prodx/db'
+import { platformScope, prisma, withScope } from '@prodx/db'
 import { randomUUID } from 'node:crypto'
 
 const TENANT_CODE = 'DEMO'
 const PASSWORD = 'prodx-demo-2026'
 
 async function main(): Promise<void> {
+  /**
+   * The old demo tenant is ARCHIVED, not deleted.
+   *
+   * The first version of this script tried to wipe it, and the append-only
+   * trigger refused: journal lines and stock movements cannot be deleted, by
+   * anyone, ever (CLAUDE.md invariant 2). That is the guarantee working, so the
+   * seed respects it instead of working around it — the previous tenant keeps
+   * its history under a dated code and a fresh DEMO is created alongside.
+   */
   const existing = await prisma.tenant.findUnique({ where: { code: TENANT_CODE } })
   if (existing !== null) {
-    // Children first: every foreign key is onDelete: Restrict by design, so
-    // business documents can never vanish by accident.
-    const t = existing.id
-    await withTenantTransaction(t, ALL_PLANTS, async (tx) => {
-      await tx.journalLine.deleteMany({})
-      await tx.journalEntry.deleteMany({})
-      await tx.stockLedgerEntry.deleteMany({})
-      await tx.stockBalance.deleteMany({})
-      await tx.itemPlantValuation.deleteMany({})
-      await tx.goodsReceiptLine.deleteMany({})
-      await tx.goodsReceipt.deleteMany({})
-      await tx.weighbridgeTicket.deleteMany({})
-      await tx.gateEvent.deleteMany({})
-      await tx.purchaseOrderLine.deleteMany({})
-      await tx.purchaseOrder.deleteMany({})
-      await tx.outboxMessage.deleteMany({})
-      await tx.approvalRecord.deleteMany({})
-      await tx.approvalRule.deleteMany({})
-      await tx.numberSeries.deleteMany({})
-      await tx.glAccount.deleteMany({})
-      await tx.fiscalPeriod.deleteMany({})
-      await tx.fiscalYear.deleteMany({})
-      await tx.stockUnit.deleteMany({})
-      await tx.itemUomConversion.deleteMany({})
-      await tx.item.deleteMany({})
-      await tx.uom.deleteMany({})
-      await tx.party.deleteMany({})
-      await tx.storageLocation.deleteMany({})
-      await tx.warehouse.deleteMany({})
-      await tx.plant.deleteMany({})
-      await tx.userDepartmentAccess.deleteMany({})
-      await tx.userPlantAccess.deleteMany({})
-      await tx.department.deleteMany({})
-      await tx.userRole.deleteMany({})
-      await tx.refreshToken.deleteMany({})
-      await tx.appUser.deleteMany({})
-      await tx.role.deleteMany({})
-      await tx.legalEntity.deleteMany({})
+    const stamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14)
+    await prisma.tenant.update({
+      where: { id: existing.id },
+      data: { code: `${TENANT_CODE}-ARCHIVED-${stamp}`, isActive: false },
     })
-    await prisma.tenant.delete({ where: { id: t } })
   }
 
   const tenantId = randomUUID()
@@ -93,7 +67,7 @@ async function main(): Promise<void> {
 
   const DEPARTMENTS = ['STORES', 'PRODUCTION', 'QUALITY', 'PURCHASE'] as const
 
-  await withTenantTransaction(tenantId, ALL_PLANTS, async (tx) => {
+  await withScope(platformScope(tenantId), async (tx) => {
     await tx.legalEntity.create({
       data: {
         id: id.legalEntity,
@@ -117,7 +91,7 @@ async function main(): Promise<void> {
     // roles and see completely different data. That separation is the point.
     await tx.role.createMany({
       data: [
-        { id: id.roleAdmin, tenantId, code: 'ADMIN', name: 'Administrator', permissions: ['*'] },
+        { id: id.roleAdmin, tenantId, code: 'ADMIN', name: 'Administrator', permissions: ['*', 'pack:manage'] },
         {
           id: id.rolePlantHead, tenantId, code: 'PLANT_HEAD', name: 'Plant Head',
           permissions: ['purchase_order:*', 'goods_receipt:*', 'stock:read', 'gate:*'],
@@ -173,6 +147,7 @@ async function main(): Promise<void> {
     })
 
     const plantIds: Record<string, string> = {}
+    const itemIds: Record<string, string> = {}
     const storesDept: Record<string, string> = {}
     let poSeq = 0
 
@@ -214,6 +189,7 @@ async function main(): Promise<void> {
       for (const spec of factory.items) {
         lineNo++
         const itemId = uid()
+        itemIds[spec.code] = itemId
         await tx.item.create({
           data: {
             id: itemId, tenantId, code: spec.code, name: spec.name,
@@ -237,6 +213,53 @@ async function main(): Promise<void> {
       }
       await tx.purchaseOrder.update({ where: { id: poId }, data: { totalAmount: total.toFixed(2) } })
     }
+
+    // ── industry packs ──────────────────────────────────────────────────────
+    //
+    // Carton is installed and carries data, so the uninstall guard has something
+    // to refuse. Textile is deliberately left uninstalled: installing it from
+    // the UI is how the plugin behaviour is demonstrated.
+    await tx.packInstallation.create({
+      data: { tenantId, packId: 'carton', version: '1.0.0', status: 'INSTALLED' },
+    })
+
+    const cartonPlant = plantIds['CARTON-01'] ?? ''
+    for (const [code, gsm, bf, deckle] of [
+      ['RM-KRAFT-180', 180, 22, 1600],
+      ['RM-FLUTE-120', 120, 16, 1600],
+    ] as const) {
+      const itemId = itemIds[code]
+      if (itemId !== undefined) {
+        await tx.cartonBoardSpec.create({
+          data: { tenantId, itemId, gsm, burstFactor: String(bf), deckleMm: deckle, liner: 'Kraft' },
+        })
+      }
+    }
+    await tx.cartonBoxStyle.create({
+      data: {
+        tenantId, code: 'RSC-5PLY-STD', name: '5 Ply RSC Export',
+        fefcoCode: '0201', flute: 'BC', ply: 5,
+        innerLengthMm: 600, innerWidthMm: 400, innerHeightMm: 400,
+      },
+    })
+    await tx.cartonTool.create({
+      data: {
+        tenantId, plantId: cartonPlant, code: 'DIE-0201-600', name: 'RSC 600x400x400 rotary die',
+        toolType: 'ROTARY_DIE', customerOwned: false, lifeLimit: 500000, currentImpressions: 128400,
+        storageLocation: 'Tool Room A',
+      },
+    })
+    await tx.cartonTrimPlan.create({
+      data: {
+        tenantId, plantId: cartonPlant, documentNo: 'TRIM/2026-27/0001',
+        planDate: new Date('2026-09-10'), deckleMm: 1600, trimWasteMm: 42,
+        trimWastePct: '2.625',
+        combination: [
+          { order: 'PO/2026-27/0001', widthMm: 780, ups: 1 },
+          { order: 'PO/2026-27/0001', widthMm: 778, ups: 1 },
+        ],
+      },
+    })
 
     // Users. Note the two plant heads hold the SAME role and differ only in scope.
     const USERS = [
@@ -276,6 +299,9 @@ async function main(): Promise<void> {
       '    carton.stores@prodx.demo  Carton Plant, Stores department, fewer rights',
       '',
       '    The two plant heads hold the SAME role and see different data.',
+      '',
+      '    Carton pack: INSTALLED, with data (uninstall will be refused).',
+      '    Textile pack: not installed — install it from the Industry packs screen.',
       '    April-August are CLOSED periods; September is open.',
       '',
     ].join('\n'),

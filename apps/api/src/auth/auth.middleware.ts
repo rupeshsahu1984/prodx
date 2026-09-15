@@ -37,6 +37,9 @@ export class AuthMiddleware implements NestMiddleware {
         // exactly their assignments, and an empty list therefore sees nothing.
         plantScope: claims.sa ? ALL_PLANTS : claims.plants,
         departmentIds: claims.depts,
+        // Never ALL_PACKS from a token: a pack the tenant has not installed must
+        // stay invisible even to a superadmin.
+        packScope: claims.packs,
       },
       () => next(),
     )

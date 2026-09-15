@@ -25,8 +25,31 @@ apps/worker        Outbox dispatcher and background jobs
 packages/db        Prisma schema, tenant client extension, RLS scripts
 packages/core      Engines. No Nest, no Prisma — unit-testable without a database.
 packages/contracts Zod schemas shared by api and web
+packages/pack-sdk  Industry-pack contract and registry
+packs/carton       Corrugated carton pack
+packs/textile      Textile & garment pack
 prototype/         The original prototype (spec)
 ```
+
+## Industry packs
+
+The core ERP is industry-neutral. Corrugated carton and textile ship as **packs** that a tenant
+installs or removes (ADR 0009):
+
+- A pack owns its own tables, permissions, document types and screens, and depends only on
+  `@prodx/pack-sdk`. Core never imports a pack; no pack imports another.
+- **Install is per tenant, not per schema.** Every pack's tables exist in every deployment —
+  one customer removing textile must not touch another customer on the same database.
+- A pack's tables are gated by RLS on `app.packs`, so disabling a pack hides its data
+  everywhere at once: API, reports and background jobs, with no application check to forget.
+- **Uninstall is refused while the pack holds data.** The answer is `disable`: the screens go,
+  the history stays readable. There is no purge flag — deleting posted manufacturing history is
+  not an operation this system offers.
+- Core rows survive either way. A textile item is still an `item`, its movements are still
+  `stock_ledger_entry` rows, and the ledger stays reconcilable.
+
+The demo tenant ships with **carton installed and textile not**, so the plugin behaviour can be
+exercised from the Industry packs panel.
 
 ## Getting started
 
@@ -115,7 +138,7 @@ passwords, permissions, JWT, auth middleware, permission guard) and 20 integrati
 - a connection that never set a tenant sees **zero rows**, not the whole table
 - one tenant cannot read, update or delete another tenant's row **even knowing its exact id**
 - an insert carrying another tenant's id is rejected by the policy's `WITH CHECK`
-- every one of the 38 tenant-scoped tables carries an enabled, forced policy
+- every one of the 47 tenant-scoped tables carries an enabled, forced policy
 - a connection with no plant scope sees **no factory at all**, and one scoped to a single
   factory cannot read or write another's data even by exact id
 - the stock ledger, genealogy, journal and audit tables reject `UPDATE` and `DELETE`

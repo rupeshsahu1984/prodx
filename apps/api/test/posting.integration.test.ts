@@ -1,29 +1,31 @@
 import { ConflictException } from '@nestjs/common'
-import { ALL_PLANTS, prisma, withTenantTransaction } from '@prodx/db'
+import { ALL_PACKS, ALL_PLANTS, platformScope, prisma, withScope } from '@prodx/db'
 import { afterAll, describe, expect, it } from 'vitest'
 import { PostingService, type PostingActor } from '../src/posting/posting.service'
 import { seedScenario } from './seed'
 
 const posting = new PostingService()
-const actor: PostingActor = {
+
+/** The scope travels with the actor now, so it has to name the tenant. */
+const actorFor = (tenantId: string): PostingActor => ({
   actorId: '01919000-0000-7000-8000-00000000aaaa',
   permissions: ['goods_receipt:post', 'goods_receipt:reverse'],
-  plantScope: ALL_PLANTS,
+  scope: { tenantId, plants: ALL_PLANTS, packs: ALL_PACKS },
   canPostAdjustments: false,
-}
+})
 
 afterAll(async () => {
   await prisma.$disconnect()
 })
 
-const read = async <T>(tenantId: string, fn: Parameters<typeof withTenantTransaction<T>>[2]) =>
-  withTenantTransaction(tenantId, ALL_PLANTS, fn)
+const read = async <T>(tenantId: string, fn: Parameters<typeof withScope<T>>[1]) =>
+  withScope(platformScope(tenantId), fn)
 
 describe('posting a goods receipt', () => {
   it('moves stock, values it, writes a balanced journal and consumes the order', async () => {
     const s = await seedScenario()
 
-    const { documentNo } = await posting.postGoodsReceipt(s.tenantId, s.goodsReceiptId, actor)
+    const { documentNo } = await posting.postGoodsReceipt(s.goodsReceiptId, actorFor(s.tenantId))
     expect(documentNo).toBe('GRN/2026-27/0001')
 
     await read(s.tenantId, async (tx) => {
@@ -68,8 +70,8 @@ describe('posting a goods receipt', () => {
 
   it('reversal restores stock, valuation and the order quantity exactly', async () => {
     const s = await seedScenario()
-    await posting.postGoodsReceipt(s.tenantId, s.goodsReceiptId, actor)
-    await posting.reverseGoodsReceipt(s.tenantId, s.goodsReceiptId, actor)
+    await posting.postGoodsReceipt(s.goodsReceiptId, actorFor(s.tenantId))
+    await posting.reverseGoodsReceipt(s.goodsReceiptId, actorFor(s.tenantId))
 
     await read(s.tenantId, async (tx) => {
       const balance = await tx.stockBalance.findFirstOrThrow({ where: { stockUnitId: s.stockUnitId } })
@@ -104,8 +106,8 @@ describe('posting a goods receipt', () => {
 
   it('refuses to post the same receipt twice', async () => {
     const s = await seedScenario()
-    await posting.postGoodsReceipt(s.tenantId, s.goodsReceiptId, actor)
-    await expect(posting.postGoodsReceipt(s.tenantId, s.goodsReceiptId, actor)).rejects.toThrow(
+    await posting.postGoodsReceipt(s.goodsReceiptId, actorFor(s.tenantId))
+    await expect(posting.postGoodsReceipt(s.goodsReceiptId, actorFor(s.tenantId))).rejects.toThrow(
       ConflictException,
     )
 
@@ -118,7 +120,7 @@ describe('posting a goods receipt', () => {
 
   it('refuses to post into a closed period, and posts nothing at all', async () => {
     const s = await seedScenario({ periodStatus: 'CLOSED' })
-    await expect(posting.postGoodsReceipt(s.tenantId, s.goodsReceiptId, actor)).rejects.toThrow(
+    await expect(posting.postGoodsReceipt(s.goodsReceiptId, actorFor(s.tenantId))).rejects.toThrow(
       /closed/i,
     )
 
@@ -134,7 +136,7 @@ describe('posting a goods receipt', () => {
 
   it('refuses to receive more than the order still has outstanding', async () => {
     const s = await seedScenario({ receiptQuantity: '140' })
-    await expect(posting.postGoodsReceipt(s.tenantId, s.goodsReceiptId, actor)).rejects.toThrow(
+    await expect(posting.postGoodsReceipt(s.goodsReceiptId, actorFor(s.tenantId))).rejects.toThrow(
       /exceeds/i,
     )
   })
@@ -142,8 +144,8 @@ describe('posting a goods receipt', () => {
   it('refuses to post without the permission, and rolls back cleanly', async () => {
     const s = await seedScenario()
     await expect(
-      posting.postGoodsReceipt(s.tenantId, s.goodsReceiptId, {
-        ...actor,
+      posting.postGoodsReceipt(s.goodsReceiptId, {
+        ...actorFor(s.tenantId),
         permissions: ['goods_receipt:read'],
       }),
     ).rejects.toThrow(/goods_receipt:post/)
@@ -156,14 +158,14 @@ describe('posting a goods receipt', () => {
   it('keeps two tenants entirely separate', async () => {
     const a = await seedScenario()
     const b = await seedScenario()
-    await posting.postGoodsReceipt(a.tenantId, a.goodsReceiptId, actor)
+    await posting.postGoodsReceipt(a.goodsReceiptId, actorFor(a.tenantId))
 
     // Tenant B's context must not see tenant A's movement, and must not be able
     // to post A's receipt by id.
     await read(b.tenantId, async (tx) => {
       expect(await tx.stockLedgerEntry.count({ where: { sourceId: a.goodsReceiptId } })).toBe(0)
     })
-    await expect(posting.postGoodsReceipt(b.tenantId, a.goodsReceiptId, actor)).rejects.toThrow(
+    await expect(posting.postGoodsReceipt(a.goodsReceiptId, actorFor(b.tenantId))).rejects.toThrow(
       /not found/i,
     )
   })

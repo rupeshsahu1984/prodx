@@ -54,6 +54,13 @@ stop and lift it into an engine.
    header, query parameter or body field.
 7. **Optimistic locking on every mutable business document** (`version` column). Two supervisors
    confirming the same work order must not double-issue stock.
+8. **Three scope dimensions, all enforced by RLS, all failing closed**: tenant
+   (`app.tenant_id`), factory (`app.plant_scope`) and industry pack (`app.packs`). They travel
+   together in one `DbScope` object, every field required, so a new dimension is a compile
+   error at every call site rather than a silent default.
+9. **A pack is installed per tenant, never per schema.** Every pack's tables exist in every
+   deployment; installation is an activation row. Uninstall is refused while the pack holds
+   data — the answer there is `disable`, which hides the screens and keeps the history.
 
 ## Repository layout
 

@@ -24,7 +24,10 @@ function guardWith(metadata: Record<string, unknown>): PermissionsGuard {
 
 const withPerms = <T>(permissions: string[], fn: () => T): T =>
   runWithContext(
-    { tenantId: 't', userId: 'u', permissions, plantScope: ALL_PLANTS, departmentIds: [] },
+    {
+      tenantId: 't', userId: 'u', permissions,
+      plantScope: ALL_PLANTS, departmentIds: [], packScope: [],
+    },
     fn,
   )
 

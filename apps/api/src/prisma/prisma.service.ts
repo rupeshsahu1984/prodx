@@ -1,12 +1,12 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common'
-import { forTenant, prisma, type TenantClient } from '@prodx/db'
-import { currentScope, currentTenantId } from '../tenancy/tenant-context'
+import { forScope, prisma, type TenantClient } from '@prodx/db'
+import { currentDbScope } from '../tenancy/tenant-context'
 
 @Injectable()
 export class PrismaService implements OnModuleDestroy {
   /** Tenant-scoped client for the current request. Use this everywhere. */
   get db(): TenantClient {
-    return forTenant(currentTenantId(), currentScope())
+    return forScope(currentDbScope())
   }
 
   /**

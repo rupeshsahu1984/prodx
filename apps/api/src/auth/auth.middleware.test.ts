@@ -22,7 +22,7 @@ describe('AuthMiddleware', () => {
   })
 
   const signed = (claims: Record<string, unknown>): string =>
-    jwt.sign({ sa: false, plants: [], depts: [], ...claims }, SECRET, {
+    jwt.sign({ sa: false, plants: [], depts: [], packs: [], ...claims }, SECRET, {
       algorithm: 'HS256',
       expiresIn: 60,
     })
@@ -80,7 +80,7 @@ describe('AuthMiddleware', () => {
 
   it('rejects a token signed with another secret', () => {
     const forged = jwt.sign(
-      { sub: USER, tid: TENANT, perms: ['*'], sa: false, plants: [], depts: [] },
+      { sub: USER, tid: TENANT, perms: ['*'], sa: false, plants: [], depts: [], packs: [] },
       'attacker-secret-long-enough',
     )
     expect(() => middleware.use(req(`Bearer ${forged}`), {} as Response, () => undefined)).toThrow(

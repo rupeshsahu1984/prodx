@@ -6,9 +6,10 @@
     "build": "nest build",
     "dev": "nest start --watch",
     "start": "node dist/main",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
-    "seed:demo": "node dist/seed-demo.js"
+    "seed:demo": "node dist/seed-demo.js",
+    "sync:packs": "node dist/sync-packs.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -22,7 +23,10 @@
     "jsonwebtoken": "^9.0.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "@prodx/pack-sdk": "workspace:*",
+    "@prodx/pack-carton": "workspace:*",
+    "@prodx/pack-textile": "workspace:*"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",

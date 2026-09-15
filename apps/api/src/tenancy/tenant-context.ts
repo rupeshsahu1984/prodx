@@ -1,4 +1,4 @@
-import type { PlantScope } from '@prodx/db'
+import type { DbScope, PackScope, PlantScope } from '@prodx/db'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
 export interface RequestContext {
@@ -12,6 +12,8 @@ export interface RequestContext {
    */
   plantScope: PlantScope
   departmentIds: readonly string[]
+  /** Industry packs enabled for this tenant. Gates pack data in the database. */
+  packScope: PackScope
 }
 
 const storage = new AsyncLocalStorage<RequestContext>()
@@ -33,4 +35,9 @@ export function currentContext(): RequestContext {
 }
 
 export const currentTenantId = (): string => currentContext().tenantId
-export const currentScope = (): PlantScope => currentContext().plantScope
+
+/** Everything the database needs to scope this request. */
+export function currentDbScope(): DbScope {
+  const { tenantId, plantScope, packScope } = currentContext()
+  return { tenantId, plants: plantScope, packs: packScope }
+}

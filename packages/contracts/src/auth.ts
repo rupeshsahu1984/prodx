@@ -31,6 +31,8 @@ export const accessClaimsSchema = z.object({
   plants: z.array(z.string().uuid()),
   /** Departments within those factories. Empty means every department of them. */
   depts: z.array(z.string().uuid()),
+  /** Industry packs installed for this tenant (ADR 0009). */
+  packs: z.array(z.string()),
 })
 export type AccessClaims = z.infer<typeof accessClaimsSchema>
 
@@ -43,4 +45,5 @@ export const meResponseSchema = z.object({
   isSuperAdmin: z.boolean(),
   plants: z.array(z.object({ id: z.string(), code: z.string(), name: z.string() })),
   departments: z.array(z.object({ id: z.string(), code: z.string(), name: z.string() })),
+  packs: z.array(z.string()),
 })

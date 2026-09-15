@@ -9,7 +9,7 @@ import {
   type PeriodStatus,
   type ValuationState,
 } from '@prodx/core'
-import { withTenantTransaction, type Prisma, type PlantScope } from '@prodx/db'
+import { withScope, type DbScope, type Prisma } from '@prodx/db'
 import Decimal from 'decimal.js'
 import { PrismaNumberSeriesAdapter } from '../numbering/number-series.adapter'
 
@@ -19,8 +19,8 @@ const D = (value: Prisma.Decimal | string | number): Decimal => new Decimal(valu
 export interface PostingActor {
   actorId: string
   permissions: readonly string[]
-  /** The factories this actor may post into. Enforced by RLS, not by a filter. */
-  plantScope: PlantScope
+  /** What this actor may touch. Enforced by RLS, not by a filter. */
+  scope: DbScope
   /** Only an actor with the adjustment permission may post into a soft-closed period. */
   canPostAdjustments: boolean
 }
@@ -36,11 +36,10 @@ export interface PostingActor {
 @Injectable()
 export class PostingService {
   async postGoodsReceipt(
-    tenantId: string,
     goodsReceiptId: string,
     actor: PostingActor,
   ): Promise<{ documentNo: string }> {
-    return withTenantTransaction(tenantId, actor.plantScope, async (tx) => {
+    return withScope(actor.scope, async (tx) => {
       const grn = await tx.goodsReceipt.findUnique({
         where: { id: goodsReceiptId },
         include: { lines: { orderBy: { lineNo: 'asc' } }, purchaseOrder: true },
@@ -170,12 +169,8 @@ export class PostingService {
    * Reversal, not deletion. The original entries stay; opposite entries are
    * added and the journal references the one it reverses.
    */
-  async reverseGoodsReceipt(
-    tenantId: string,
-    goodsReceiptId: string,
-    actor: PostingActor,
-  ): Promise<void> {
-    await withTenantTransaction(tenantId, actor.plantScope, async (tx) => {
+  async reverseGoodsReceipt(goodsReceiptId: string, actor: PostingActor): Promise<void> {
+    await withScope(actor.scope, async (tx) => {
       const grn = await tx.goodsReceipt.findUnique({
         where: { id: goodsReceiptId },
         include: { lines: { orderBy: { lineNo: 'asc' } } },

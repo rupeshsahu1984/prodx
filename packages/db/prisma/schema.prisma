@@ -87,6 +87,10 @@ model Plant {
   goodsReceipts  GoodsReceipt[]
   departments    Department[]
   userAccess     UserPlantAccess[]
+  cartonTools    CartonTool[]
+  cartonTrimPlans CartonTrimPlan[]
+  textileDyeLots TextileDyeLot[]
+  textileGrading TextileGrading[]
 
   @@unique([tenantId, code])
   @@index([tenantId, legalEntityId])
@@ -302,6 +306,9 @@ model Item {
   ledger       StockLedgerEntry[]
   poLines      PurchaseOrderLine[]
   grnLines     GoodsReceiptLine[]
+  cartonBoard  CartonBoardSpec?
+  textileYarn  TextileYarnSpec?
+  textileFabric TextileFabricSpec?
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -366,6 +373,7 @@ model StockUnit {
   parents   StockUnitLink[]    @relation("LinkChild")
   children  StockUnitLink[]    @relation("LinkParent")
   grnLines  GoodsReceiptLine[]
+  grading   TextileGrading[]
 
   @@unique([tenantId, itemId, reference])
   @@index([tenantId, itemId])
@@ -1039,4 +1047,245 @@ model UserDepartmentAccess {
   @@unique([tenantId, userId, departmentId])
   @@index([tenantId, userId])
   @@map("user_department_access")
+}
+
+// ───────────────────────────── industry packs (ADR 0009) ─────────────────────────────
+//
+// Every pack's tables exist in every deployment. Installation is a PER-TENANT
+// activation, never a migration — tenant A uninstalling textile must not touch
+// tenant B on the same schema.
+
+enum PackStatus {
+  /// Screens, APIs and new documents all work.
+  INSTALLED
+  /// Hidden and read-only. For a customer who stopped a product line but still
+  /// needs last year's history and audit trail.
+  DISABLED
+}
+
+/// Which tables each pack owns, written from the code registry by `sync-packs`.
+/// The catalogue lives in code; this table exists so the RLS generator — which
+/// runs before any application process — can gate pack tables without hardcoding
+/// a list that would drift.
+model PackTable {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  packId    String   @map("pack_id")
+  tableName String   @unique @map("table_name")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([packId])
+  @@map("pack_table")
+}
+
+model PackInstallation {
+  id       String     @id @default(uuid(7)) @db.Uuid
+  tenantId String     @db.Uuid @map("tenant_id")
+  /// Matches PackManifest.id. Not a foreign key: the catalogue of packs lives in
+  /// code, and a tenant row must survive a pack being dropped from the build.
+  packId   String     @map("pack_id")
+  version  String
+  status   PackStatus @default(INSTALLED)
+
+  installedAt  DateTime  @default(now()) @map("installed_at") @db.Timestamptz(6)
+  installedById String?  @db.Uuid @map("installed_by_id")
+  disabledAt   DateTime? @map("disabled_at") @db.Timestamptz(6)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, packId])
+  @@index([tenantId])
+  @@map("pack_installation")
+}
+
+// ── carton pack ─────────────────────────────────────────────────────────────
+
+model CartonBoardSpec {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
+  /// Extends a core item rather than replacing it: stock, costing and the ledger
+  /// stay in core, so uninstalling the pack cannot break inventory valuation.
+  itemId   String @unique @db.Uuid @map("item_id")
+
+  gsm        Int
+  burstFactor Decimal? @map("burst_factor") @db.Decimal(6, 2)
+  deckleMm   Int      @map("deckle_mm")
+  liner      String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@map("carton_board_spec")
+}
+
+model CartonBoxStyle {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
+  code     String
+  name     String
+
+  /// FEFCO code, e.g. 0201 for a regular slotted container.
+  fefcoCode String? @map("fefco_code")
+  flute     String
+  ply       Int
+
+  innerLengthMm Int @map("inner_length_mm")
+  innerWidthMm  Int @map("inner_width_mm")
+  innerHeightMm Int @map("inner_height_mm")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("carton_box_style")
+}
+
+model CartonTool {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
+  plantId  String @db.Uuid @map("plant_id")
+  code     String
+  name     String
+  /// ROTARY_DIE, FLAT_DIE, FLEXO_PLATE, STEREO, CUTTING_FORM
+  toolType String @map("tool_type")
+
+  /// Customer-owned tooling is a liability, not an asset — it must be tracked
+  /// separately from anything the plant owns.
+  customerOwned Boolean @default(false) @map("customer_owned")
+  lifeLimit         Int? @map("life_limit")
+  currentImpressions Int @default(0) @map("current_impressions")
+  storageLocation   String? @map("storage_location")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plant Plant @relation(fields: [plantId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, code])
+  @@index([tenantId, plantId])
+  @@map("carton_tool")
+}
+
+model CartonTrimPlan {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
+  plantId  String @db.Uuid @map("plant_id")
+
+  documentNo String   @map("document_no")
+  planDate   DateTime @map("plan_date") @db.Date
+
+  deckleMm      Int     @map("deckle_mm")
+  /// The number the whole exercise exists to reduce.
+  trimWasteMm   Int     @map("trim_waste_mm")
+  trimWastePct  Decimal @map("trim_waste_pct") @db.Decimal(6, 3)
+  /// Which orders were combined on the deck, and at what width.
+  combination   Json    @default("[]")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plant Plant @relation(fields: [plantId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, documentNo])
+  @@index([tenantId, plantId, planDate])
+  @@map("carton_trim_plan")
+}
+
+// ── textile pack ────────────────────────────────────────────────────────────
+
+model TextileYarnSpec {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
+  itemId   String @unique @db.Uuid @map("item_id")
+
+  count String
+  fibre String
+  twist String?
+  ply   Int?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@map("textile_yarn_spec")
+}
+
+model TextileFabricSpec {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
+  itemId   String @unique @db.Uuid @map("item_id")
+
+  gsm          Int
+  widthInch    Decimal @map("width_inch") @db.Decimal(6, 2)
+  construction String?
+  finish       String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  item Item @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@map("textile_fabric_spec")
+}
+
+model TextileDyeLot {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
+  plantId  String @db.Uuid @map("plant_id")
+
+  documentNo String   @map("document_no")
+  lotDate    DateTime @map("lot_date") @db.Date
+
+  colourCode String  @map("colour_code")
+  /// The attribute a garment is cut against. Two lots in the same band may be
+  /// mixed in one garment; across bands they may not, and allocation has to
+  /// respect that (gap 18).
+  shadeBand  String  @map("shade_band")
+  recipe     Json    @default("{}")
+  /// Approved lab dip reference, without which production must not start.
+  labDipRef  String? @map("lab_dip_ref")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plant Plant @relation(fields: [plantId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, documentNo])
+  @@index([tenantId, plantId, shadeBand])
+  @@map("textile_dye_lot")
+}
+
+model TextileGrading {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid @map("tenant_id")
+  plantId  String @db.Uuid @map("plant_id")
+
+  documentNo  String   @map("document_no")
+  inspectedAt DateTime @map("inspected_at") @db.Timestamptz(6)
+
+  /// The roll being graded. A core stock unit, so grading never takes inventory
+  /// out of core's hands.
+  stockUnitId String @db.Uuid @map("stock_unit_id")
+
+  /// 4-point system points per 100 square metres.
+  pointsPer100m2 Decimal @map("points_per_100m2") @db.Decimal(8, 2)
+  grade          String
+  inspectedMetre Decimal @map("inspected_metre") @db.Decimal(18, 3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plant     Plant     @relation(fields: [plantId], references: [id], onDelete: Restrict)
+  stockUnit StockUnit @relation(fields: [stockUnitId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, documentNo])
+  @@index([tenantId, plantId])
+  @@index([tenantId, stockUnitId])
+  @@map("textile_grading")
 }

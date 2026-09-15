@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common'
 import type { LoginRequest, TokenPair } from '@prodx/contracts'
 import { hashPassword, needsRehash, verifyPassword } from '@prodx/core'
-import { ALL_PLANTS, prisma, withTenantTransaction } from '@prodx/db'
+import { platformScope, prisma, withScope } from '@prodx/db'
 import { createHash, randomBytes } from 'node:crypto'
 import { ACCESS_TOKEN_TTL_SECONDS, JwtService } from './jwt.service'
 
@@ -39,7 +39,7 @@ export class AuthService {
     const user =
       tenant === null || !tenant.isActive
         ? null
-        : await withTenantTransaction(tenant.id, ALL_PLANTS, (tx) =>
+        : await withScope(platformScope(tenant.id), (tx) =>
             // Identity tables carry no plant_id, so plant scope does not apply
             // here — this is where the user's own scope is being discovered.
             tx.appUser.findUnique({
@@ -74,7 +74,7 @@ export class AuthService {
 
     if (!(await verifyPassword(request.password, user.passwordHash))) {
       const attempts = user.failedLoginAttempts + 1
-      await withTenantTransaction(user.tenantId, ALL_PLANTS, (tx) =>
+      await withScope(platformScope(user.tenantId), (tx) =>
         tx.appUser.update({
           where: { id: user.id },
           data: {
@@ -89,7 +89,7 @@ export class AuthService {
     const rehashed = needsRehash(user.passwordHash)
       ? { passwordHash: await hashPassword(request.password) }
       : {}
-    await withTenantTransaction(user.tenantId, ALL_PLANTS, (tx) =>
+    await withScope(platformScope(user.tenantId), (tx) =>
       tx.appUser.update({
         where: { id: user.id },
         // Transparent upgrade when the cost parameters are raised.
@@ -102,6 +102,7 @@ export class AuthService {
       isSuperAdmin: user.isSuperAdmin,
       plantIds: user.plantAccess.map((a) => a.plantId),
       departmentIds: user.deptAccess.map((a) => a.departmentId),
+      packs: await this.installedPacks(user.tenantId),
     })
   }
 
@@ -120,7 +121,7 @@ export class AuthService {
     const tenantId = tenantIdFromToken(refreshToken)
     if (tenantId === null) throw invalid
 
-    const stored = await withTenantTransaction(tenantId, ALL_PLANTS, (tx) =>
+    const stored = await withScope(platformScope(tenantId), (tx) =>
       tx.refreshToken.findUnique({
         where: { tokenHash: hashToken(refreshToken) },
         include: { user: { include: { roles: { include: { role: true } } } } },
@@ -131,7 +132,7 @@ export class AuthService {
     if (stored.revokedAt !== null) {
       // Reuse of a rotated token means it leaked. Revoke the whole family: the
       // thief and the victim are both signed out, which is the right outcome.
-      await withTenantTransaction(tenantId, ALL_PLANTS, (tx) =>
+      await withScope(platformScope(tenantId), (tx) =>
         tx.refreshToken.updateMany({
           where: { userId: stored.userId, revokedAt: null },
           data: { revokedAt: new Date() },
@@ -144,7 +145,7 @@ export class AuthService {
 
     // Scope is re-read on every refresh, so revoking a user's access to a plant
     // takes effect within one access-token lifetime rather than at next login.
-    const scope = await withTenantTransaction(tenantId, ALL_PLANTS, (tx) =>
+    const scope = await withScope(platformScope(tenantId), (tx) =>
       tx.appUser.findUniqueOrThrow({
         where: { id: stored.userId },
         include: { roles: { include: { role: true } }, plantAccess: true, deptAccess: true },
@@ -155,8 +156,11 @@ export class AuthService {
       isSuperAdmin: scope.isSuperAdmin,
       plantIds: scope.plantAccess.map((a) => a.plantId),
       departmentIds: scope.deptAccess.map((a) => a.departmentId),
+      // Re-read on refresh, so installing or disabling a pack takes effect
+      // within one access-token lifetime rather than at next sign-in.
+      packs: await this.installedPacks(stored.tenantId),
     })
-    await withTenantTransaction(tenantId, ALL_PLANTS, (tx) =>
+    await withScope(platformScope(tenantId), (tx) =>
       tx.refreshToken.update({ where: { id: stored.id }, data: { revokedAt: new Date() } }),
     )
     return pair
@@ -165,12 +169,20 @@ export class AuthService {
   async logout(refreshToken: string): Promise<void> {
     const tenantId = tenantIdFromToken(refreshToken)
     if (tenantId === null) return
-    await withTenantTransaction(tenantId, ALL_PLANTS, (tx) =>
+    await withScope(platformScope(tenantId), (tx) =>
       tx.refreshToken.updateMany({
         where: { tokenHash: hashToken(refreshToken), revokedAt: null },
         data: { revokedAt: new Date() },
       }),
     )
+  }
+
+  /** Only INSTALLED packs reach the token; a DISABLED pack is read-only history. */
+  private async installedPacks(tenantId: string): Promise<string[]> {
+    const rows = await withScope(platformScope(tenantId), (tx) =>
+      tx.packInstallation.findMany({ where: { status: 'INSTALLED' }, select: { packId: true } }),
+    )
+    return rows.map((r) => r.packId)
   }
 
   private async issue(
@@ -181,13 +193,14 @@ export class AuthService {
       isSuperAdmin: boolean
       plantIds: string[]
       departmentIds: string[]
+      packs: string[]
     },
   ): Promise<TokenPair> {
     // `<tenantId>.<secret>`. The tenant is a routing hint so the lookup can
     // establish RLS context — it is not a secret, and it is already visible in
     // the access token. All the entropy is in the second half.
     const refreshToken = `${tenantId}.${randomBytes(32).toString('base64url')}`
-    await withTenantTransaction(tenantId, ALL_PLANTS, (tx) =>
+    await withScope(platformScope(tenantId), (tx) =>
       tx.refreshToken.create({
         data: {
           tenantId,
@@ -205,6 +218,7 @@ export class AuthService {
         sa: scope.isSuperAdmin,
         plants: scope.plantIds,
         depts: scope.departmentIds,
+        packs: scope.packs,
       }),
       refreshToken,
       expiresIn: ACCESS_TOKEN_TTL_SECONDS,

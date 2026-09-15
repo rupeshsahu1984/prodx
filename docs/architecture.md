@@ -30,7 +30,10 @@ apps/worker        BullMQ processors (separate deployable, shared code)
 packages/db        Prisma schema, migrations, tenant client extension
 packages/contracts Zod schemas — the one API contract, imported by both sides
 packages/core      Engines. Framework-agnostic, no Nest, no Prisma imports.
+packages/pack-sdk  Industry-pack contract and registry (ADR 0009)
 packages/ui        Design system ported from the prototype
+packs/carton       Corrugated carton pack
+packs/textile      Textile & garment pack
 prototype/         Original HTML prototype. Spec. Do not edit.
 docs/adr/          Architecture decision records
 ```

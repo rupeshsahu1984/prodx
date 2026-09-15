@@ -47,6 +47,16 @@ echo "==> application role"
 psql -U "$SUPERUSER" -d "$DB" -v ON_ERROR_STOP=1 -q \
   -v app_password="$PW" -f "$HERE/create-app-role.sql"
 
+echo "==> pack catalogue"
+# The RLS generator needs to know which tables each pack owns, and that lives in
+# code. Built output is required, so this runs after the api package is built.
+SYNC="$HERE/../../../apps/api/dist/sync-packs.js"
+if [ ! -f "$SYNC" ]; then
+  echo "FAIL: $SYNC not found. Run: pnpm --filter @prodx/api build"
+  exit 1
+fi
+DATABASE_URL="$OWNER_URL" node "$SYNC"
+
 echo "==> row level security"
 PGPASSWORD="$PW" psql "$OWNER_URL" -v ON_ERROR_STOP=1 -q -f "$HERE/rls.sql"
 

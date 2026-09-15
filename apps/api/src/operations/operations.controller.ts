@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@ne
 import { AnyAuthenticated, RequirePermission } from '../auth/permissions.guard'
 import { PostingService } from '../posting/posting.service'
 import { PrismaService } from '../prisma/prisma.service'
-import { currentContext } from '../tenancy/tenant-context'
+import { currentContext, currentDbScope } from '../tenancy/tenant-context'
 
 /**
  * Read and action endpoints for the procure-to-receive flow.
@@ -21,7 +21,7 @@ export class OperationsController {
   @Get('me')
   @AnyAuthenticated()
   async me(): Promise<unknown> {
-    const { userId, tenantId, permissions, departmentIds } = currentContext()
+    const { userId, tenantId, permissions, departmentIds, packScope } = currentContext()
     const user = await this.prisma.db.appUser.findUniqueOrThrow({
       where: { id: userId },
       select: { email: true, displayName: true, isSuperAdmin: true },
@@ -37,7 +37,10 @@ export class OperationsController {
             select: { id: true, code: true, name: true },
           }),
     ])
-    return { userId, tenantId, permissions, ...user, plants, departments }
+    return {
+      userId, tenantId, permissions, ...user, plants, departments,
+      packs: packScope === '*' ? [] : [...packScope],
+    }
   }
 
   @Get('purchase-orders')
@@ -116,10 +119,10 @@ export class OperationsController {
     @Param('id', ParseUUIDPipe) purchaseOrderId: string,
     @Body() body: { postingDate?: string },
   ): Promise<{ goodsReceiptId: string }> {
-    const { tenantId, plantScope } = currentContext()
-    const { withTenantTransaction } = await import('@prodx/db')
+    const { withScope } = await import('@prodx/db')
+    const { tenantId } = currentContext()
 
-    return withTenantTransaction(tenantId, plantScope, async (tx) => {
+    return withScope(currentDbScope(), async (tx) => {
       const po = await tx.purchaseOrder.findUniqueOrThrow({
         where: { id: purchaseOrderId },
         include: { lines: { orderBy: { lineNo: 'asc' }, include: { item: true } } },
@@ -176,11 +179,11 @@ export class OperationsController {
   @RequirePermission('goods_receipt:post')
   @HttpCode(200)
   async post(@Param('id', ParseUUIDPipe) id: string): Promise<{ documentNo: string }> {
-    const { tenantId, userId, permissions, plantScope } = currentContext()
-    return this.posting.postGoodsReceipt(tenantId, id, {
+    const { userId, permissions } = currentContext()
+    return this.posting.postGoodsReceipt(id, {
       actorId: userId,
       permissions,
-      plantScope,
+      scope: currentDbScope(),
       canPostAdjustments: false,
     })
   }
@@ -189,11 +192,11 @@ export class OperationsController {
   @RequirePermission('goods_receipt:reverse')
   @HttpCode(204)
   async reverse(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    const { tenantId, userId, permissions, plantScope } = currentContext()
-    await this.posting.reverseGoodsReceipt(tenantId, id, {
+    const { userId, permissions } = currentContext()
+    await this.posting.reverseGoodsReceipt(id, {
       actorId: userId,
       permissions,
-      plantScope,
+      scope: currentDbScope(),
       canPostAdjustments: false,
     })
   }

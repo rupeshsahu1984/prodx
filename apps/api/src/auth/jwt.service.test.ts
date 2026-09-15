@@ -19,6 +19,7 @@ describe('JwtService', () => {
     sa: false,
     plants: ['01919000-0000-7000-8000-0000000000p1'.replace(/p/g, 'c')],
     depts: [],
+    packs: ['carton'],
   }
 
   it('round-trips valid claims', () => {

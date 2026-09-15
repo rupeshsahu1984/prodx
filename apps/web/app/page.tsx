@@ -40,6 +40,12 @@ interface Stock {
   valuations: { id: string; quantityOnHand: string; totalValue: string; unitCost: string; item: { code: string; name: string } }[]
 }
 interface JournalLine { id: string; debit: string; credit: string; glAccount: { code: string; name: string } }
+interface Pack {
+  id: string; name: string; version: string; description: string
+  state: 'NOT_INSTALLED' | 'INSTALLED' | 'DISABLED'
+  moduleCount: number; permissionCount: number; rowCount: number
+}
+interface NavEntry { group: string; label: string; path: string; permission: string }
 interface Journal { id: string; documentNo: string; narration: string | null; sourceType: string; lines: JournalLine[] }
 
 const money = (v: string) => `₹ ${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
@@ -52,6 +58,8 @@ export default function Page() {
   const [grns, setGrns] = useState<GRN[]>([])
   const [stock, setStock] = useState<Stock | null>(null)
   const [journal, setJournal] = useState<Journal[]>([])
+  const [packs, setPacks] = useState<Pack[]>([])
+  const [packNav, setPackNav] = useState<NavEntry[]>([])
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
@@ -79,11 +87,13 @@ export default function Page() {
   const load = useCallback(async () => {
     if (token === null) return
     try {
-      const [meRes, poRes, grnRes, stockRes, jRes] = await Promise.all([
-        call('/me'), call('/purchase-orders'), call('/goods-receipts'), call('/stock/balances'), call('/journal'),
+      const [meRes, poRes, grnRes, stockRes, jRes, packRes, navRes] = await Promise.all([
+        call('/me'), call('/purchase-orders'), call('/goods-receipts'), call('/stock/balances'),
+        call('/journal'), call('/packs'), call('/packs/navigation'),
       ])
       setMe(meRes as Me); setPos(poRes as PO[]); setGrns(grnRes as GRN[])
-      setStock(stockRes as Stock); setJournal(jRes as Journal[]); setError('')
+      setStock(stockRes as Stock); setJournal(jRes as Journal[])
+      setPacks(packRes as Pack[]); setPackNav(navRes as NavEntry[]); setError('')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       if (String(e).includes('401') || String(e).includes('valid')) signOut()
@@ -135,6 +145,20 @@ export default function Page() {
                   : [...new Set(me.departments.map((d) => d.code))].map((c) => <span key={c}>{c}</span>)}
               </div>
             </div>
+
+            {packNav.length > 0 && (
+              <div className="scope">
+                <h3>From installed packs</h3>
+                {[...new Set(packNav.map((n) => n.group))].map((group) => (
+                  <div key={group} style={{ marginBottom: 10 }}>
+                    <div className="ngroup">{group}</div>
+                    {packNav.filter((n) => n.group === group).map((n) => (
+                      <div key={n.path} className="nleaf">{n.label}</div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
 
             <nav className="nav">
               {DOMAINS.map((d) => {
@@ -247,6 +271,64 @@ export default function Page() {
                 ))}
               </tbody>
             </table>
+          )}
+        </section>
+
+        <section className="panel">
+          <div className="phead">
+            <div>
+              <h2>Industry packs</h2>
+              <small>
+                The core ERP is industry-neutral. A pack adds its own screens, permissions and
+                tables — and its data is hidden by the database itself when the pack is off.
+              </small>
+            </div>
+          </div>
+          {packs.length === 0 ? <div className="empty">No packs in this build.</div> : (
+            <div className="packs">
+              {packs.map((p) => (
+                <article key={p.id} className={`pack ${p.state}`}>
+                  <header>
+                    <div>
+                      <b>{p.name}</b>
+                      <small>v{p.version} · {p.moduleCount} modules · {p.permissionCount} permissions</small>
+                    </div>
+                    <span className={`chip ${p.state}`}>{p.state.replace('_', ' ')}</span>
+                  </header>
+                  <p>{p.description}</p>
+                  <footer>
+                    <small>
+                      {p.rowCount === 0
+                        ? 'No records yet'
+                        : `${p.rowCount} record${p.rowCount === 1 ? '' : 's'} — uninstall is refused, disable instead`}
+                    </small>
+                    <div className="pactions">
+                      {p.state !== 'INSTALLED' && (
+                        <button className="btn primary" disabled={busy}
+                          onClick={() => act(() => call(`/packs/${p.id}/install`, { method: 'POST' }),
+                            `${p.name} installed. Sign out and back in to pick up its permissions.`)}>
+                          {p.state === 'DISABLED' ? 'Re-enable' : 'Install'}
+                        </button>
+                      )}
+                      {p.state === 'INSTALLED' && (
+                        <button className="btn" disabled={busy}
+                          onClick={() => act(() => call(`/packs/${p.id}/disable`, { method: 'POST' }),
+                            `${p.name} disabled. Its data is kept and hidden.`)}>
+                          Disable
+                        </button>
+                      )}
+                      {p.state !== 'NOT_INSTALLED' && (
+                        <button className="btn" disabled={busy}
+                          onClick={() => act(() => call(`/packs/${p.id}`, { method: 'DELETE' }),
+                            `${p.name} uninstalled.`)}>
+                          Uninstall
+                        </button>
+                      )}
+                    </div>
+                  </footer>
+                </article>
+              ))}
+            </div>
           )}
         </section>
 
