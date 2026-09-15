@@ -151,7 +151,7 @@ export async function seedScenario(
         tenantId,
         legalEntityId: ids.legalEntityId,
         plantId: ids.plantId,
-        documentNo: '',
+        documentNo: null,
         purchaseOrderId: ids.purchaseOrderId,
         supplierId: ids.supplierId,
         state: 'DRAFT',

@@ -81,6 +81,33 @@ export class Workflow<S extends string> {
     return transition.to
   }
 
+  /**
+   * Validates the transition and the maker-checker rule, but NOT the
+   * permission — the caller has already established authority by another route.
+   *
+   * Approval is the case this exists for. The approval matrix decides which
+   * authority a given amount band demands, and that can be a permission the
+   * workflow's generic `approve` right knows nothing about: someone who may
+   * sign only above a threshold holds `approve_high_value` and need not hold
+   * `approve` as well. Re-checking the workflow's permission here would force
+   * every specialised approver to also hold the general one, which quietly
+   * defeats the point of having bands.
+   */
+  applyAuthorised(from: S, action: string, context: Omit<TransitionContext, 'permissions'>): S {
+    const transition = this.definition.transitions.find((t) => t.from === from && t.action === action)
+    if (transition === undefined) throw new InvalidTransitionError(from, action)
+
+    if (transition.requiresDifferentPerson === true) {
+      if (context.submittedBy === undefined) {
+        throw new Error(
+          `Transition "${action}" requires maker-checker but no submitter was supplied.`,
+        )
+      }
+      assertDifferentPerson(context.submittedBy, context.actorId)
+    }
+    return transition.to
+  }
+
   isTerminal(state: S): boolean {
     return this.availableFrom(state).length === 0
   }

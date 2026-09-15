@@ -116,7 +116,7 @@ export class PostingService {
       }
 
       const documentNo =
-        grn.documentNo !== ''
+        grn.documentNo !== null
           ? grn.documentNo
           : await allocateDocumentNumber(new PrismaNumberSeriesAdapter(tx), {
               tenantId: grn.tenantId,

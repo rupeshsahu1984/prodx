@@ -59,6 +59,21 @@ export class DomainExceptionFilter implements ExceptionFilter {
     }
 
     const code = (exception as { code?: unknown })?.code
+
+    // Prisma's unique-violation is a business condition, not a crash: two users
+    // releasing at once, or a number series configured behind the documents
+    // already issued. A 500 here would hide a fixable problem behind "try again".
+    if (code === 'P2002') {
+      const target = (exception as { meta?: { target?: unknown } })?.meta?.target
+      response.status(409).json({
+        code: 'DUPLICATE_VALUE',
+        message: Array.isArray(target)
+          ? `A record with this ${target.join(', ')} already exists.`
+          : 'A record with these values already exists.',
+      })
+      return
+    }
+
     const status = typeof code === 'string' ? STATUS_BY_CODE[code] : undefined
 
     if (status === undefined) {

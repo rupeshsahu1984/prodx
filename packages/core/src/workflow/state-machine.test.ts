@@ -83,6 +83,35 @@ describe('purchase order workflow', () => {
     expect(purchaseOrderWorkflow.isTerminal('DRAFT')).toBe(false)
   })
 
+  describe('applyAuthorised', () => {
+    it('skips the permission check when authority came from elsewhere', () => {
+      // A high-value approver holds purchase_order:approve_high_value and need
+      // not also hold the generic approve right. Re-checking it here would force
+      // every specialised approver to hold the general one, defeating bands.
+      expect(
+        purchaseOrderWorkflow.applyAuthorised('PENDING_APPROVAL', 'approve', {
+          actorId: CHECKER,
+          submittedBy: MAKER,
+        }),
+      ).toBe('APPROVED')
+    })
+
+    it('still enforces maker-checker', () => {
+      expect(() =>
+        purchaseOrderWorkflow.applyAuthorised('PENDING_APPROVAL', 'approve', {
+          actorId: MAKER,
+          submittedBy: MAKER,
+        }),
+      ).toThrow(SegregationOfDutiesError)
+    })
+
+    it('still refuses a transition the state does not allow', () => {
+      expect(() =>
+        purchaseOrderWorkflow.applyAuthorised('DRAFT', 'approve', { actorId: CHECKER }),
+      ).toThrow(InvalidTransitionError)
+    })
+  })
+
   it('allowedFor hides what the actor cannot do', () => {
     // This is what the UI should render from — not a hardcoded button list.
     const allowed = purchaseOrderWorkflow.allowedFor('PENDING_APPROVAL', {

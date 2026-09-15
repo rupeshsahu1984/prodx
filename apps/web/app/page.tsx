@@ -33,8 +33,8 @@ const DOMAINS: { name: string; modules: number; live?: number; perm?: string }[]
   { name: 'Reports, AI & Administration', modules: 10 },
 ]
 interface Line { id: string; lineNo: number; quantity: string; receivedQuantity: string; rate: string; amount: string; item: { code: string; name: string } }
-interface PO { id: string; plantId: string; documentNo: string; state: string; totalAmount: string; supplier: { name: string }; plant: { code: string }; lines: Line[] }
-interface GRN { id: string; documentNo: string; state: string; postingDate: string; purchaseOrder: { documentNo: string }; lines: { id: string; quantity: string; amount: string; item: { code: string } }[] }
+interface PO { id: string; plantId: string; documentNo: string | null; state: string; totalAmount: string; supplier: { name: string }; plant: { code: string }; lines: Line[] }
+interface GRN { id: string; documentNo: string | null; state: string; postingDate: string; purchaseOrder: { documentNo: string }; lines: { id: string; quantity: string; amount: string; item: { code: string } }[] }
 interface Stock {
   balances: { id: string; quantity: string; stockUnit: { reference: string; item: { code: string; name: string } }; storageLocation: { code: string } }[]
   valuations: { id: string; quantityOnHand: string; totalValue: string; unitCost: string; item: { code: string; name: string } }[]
@@ -259,14 +259,17 @@ export default function Page() {
         </div>
 
         <section className="panel">
-          <div className="phead"><div><h2>Purchase orders</h2><small>Receive creates a draft for everything still outstanding</small></div></div>
+          <div className="phead"><div><h2>Purchase orders</h2><small>
+            Draft → submit → approve → release → receive. Whoever submits cannot approve —
+            try it as the same user and the backend refuses.
+          </small></div></div>
           {pos.length === 0 ? <div className="empty">No purchase orders.</div> : (
             <table>
               <thead><tr><th>Document</th><th>Supplier</th><th>Item</th><th className="num">Ordered</th><th className="num">Received</th><th className="num">Amount</th><th>State</th><th></th></tr></thead>
               <tbody>
                 {pos.map((po) => po.lines.map((line, i) => (
                   <tr key={line.id}>
-                    {i === 0 && <td rowSpan={po.lines.length} className="code">{po.documentNo}</td>}
+                    {i === 0 && <td rowSpan={po.lines.length} className="code">{po.documentNo ?? <span style={{ color: 'var(--muted)', fontWeight: 400 }}>unnumbered</span>}</td>}
                     {i === 0 && <td rowSpan={po.lines.length}>{po.supplier.name}</td>}
                     <td><b>{line.item.code}</b><br /><small style={{ color: 'var(--muted)' }}>{line.item.name}</small></td>
                     <td className="num">{qty(line.quantity)}</td>
@@ -275,10 +278,44 @@ export default function Page() {
                     {i === 0 && <td rowSpan={po.lines.length}><span className={`chip ${po.state}`}>{po.state}</span></td>}
                     {i === 0 && (
                       <td rowSpan={po.lines.length}>
-                        <button className="btn primary" disabled={busy}
-                          onClick={() => act(() => call(`/purchase-orders/${po.id}/receive`, { method: 'POST', body: '{}' }), 'Draft receipt created.')}>
-                          Receive
-                        </button>
+                        <div className="pactions">
+                          {/* Driven by the order's own state, not by a fixed button list —
+                              the backend workflow is the authority and refuses anything else. */}
+                          {po.state === 'DRAFT' && (
+                            <button className="btn primary" disabled={busy}
+                              onClick={() => act(() => call(`/purchase-orders/${po.id}/submit`, { method: 'POST' }),
+                                'Submitted for approval. The submitter cannot approve it.')}>
+                              Submit
+                            </button>
+                          )}
+                          {po.state === 'PENDING_APPROVAL' && (
+                            <>
+                              <button className="btn primary" disabled={busy}
+                                onClick={() => act(() => call(`/purchase-orders/${po.id}/approve`, { method: 'POST', body: '{}' }),
+                                  'Approved.')}>
+                                Approve
+                              </button>
+                              <button className="btn" disabled={busy}
+                                onClick={() => act(() => call(`/purchase-orders/${po.id}/reject`, { method: 'POST' }),
+                                  'Rejected — back to draft. Earlier signatures no longer count.')}>
+                                Reject
+                              </button>
+                            </>
+                          )}
+                          {po.state === 'APPROVED' && (
+                            <button className="btn primary" disabled={busy}
+                              onClick={() => act(() => call(`/purchase-orders/${po.id}/release`, { method: 'POST' }),
+                                'Released — the order now has its number.')}>
+                              Release
+                            </button>
+                          )}
+                          {po.state === 'RELEASED' && (
+                            <button className="btn primary" disabled={busy}
+                              onClick={() => act(() => call(`/purchase-orders/${po.id}/receive`, { method: 'POST', body: '{}' }), 'Draft receipt created.')}>
+                              Receive
+                            </button>
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -296,7 +333,7 @@ export default function Page() {
               <tbody>
                 {grns.map((g) => (
                   <tr key={g.id}>
-                    <td className="code">{g.documentNo === '' ? '—' : g.documentNo}</td>
+                    <td className="code">{g.documentNo ?? '—'}</td>
                     <td>{g.purchaseOrder.documentNo}</td>
                     <td>{g.postingDate.slice(0, 10)}</td>
                     <td className="num">{g.lines.length}</td>

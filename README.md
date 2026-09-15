@@ -87,7 +87,12 @@ The two plant heads hold the **same role** and see completely different data. Pe
 decide which actions a user may take; **scope** decides which data they may touch, and scope
 is enforced by row level security rather than by a filter any developer could forget.
 
-**Receive** on the purchase order creates a draft for everything outstanding; **Post** moves
+Each factory has one released order and one **draft awaiting approval**. Sign in as
+`carton.stores`, submit the draft, then try to approve it — the backend refuses, because the
+store executive can raise an order but not approve one. Sign in as `carton.head` and approve
+the same order; it then releases and gets its document number.
+
+**Receive** on a released purchase order creates a draft for everything outstanding; **Post** moves
 stock, revalues the items and writes the journal in one transaction; **Reverse** puts all of
 it back. Sign in as the buyer to watch the same Reverse button return 403 from the backend.
 
@@ -158,6 +163,10 @@ passwords, permissions, JWT, auth middleware, permission guard) and 20 integrati
   replaying it would silently discard a real event
 - a vehicle that entered against a purchase order **cannot leave** until the goods receipt is
   posted
+- **whoever submits a purchase order cannot approve it** — not even a superadmin holding every
+  permission; a second person must act
+- a rejected order keeps its approval records (they are facts) but starts the next round with
+  no signatures
 
 The integration suite deliberately **fails** rather than skipping when no database is present.
 

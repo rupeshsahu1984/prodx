@@ -40,6 +40,14 @@ describe('DomainExceptionFilter', () => {
     expect(json.mock.calls[0]?.[0]).toMatchObject({ code: 'FORBIDDEN' })
   })
 
+  it('maps a Prisma unique violation to 409 and names the field', () => {
+    const { host, status, json } = capture()
+    filter.catch(Object.assign(new Error('x'), { code: 'P2002', meta: { target: ['document_no'] } }), host)
+    expect(status).toHaveBeenCalledWith(409)
+    expect(json.mock.calls[0]?.[0]).toMatchObject({ code: 'DUPLICATE_VALUE' })
+    expect(String(json.mock.calls[0]?.[0]?.message)).toContain('document_no')
+  })
+
   it('hides the detail of an unmapped error', () => {
     // An internal message can leak schema and business rules.
     const { host, status, json } = capture()

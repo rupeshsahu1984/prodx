@@ -10,9 +10,10 @@ import { OperationsModule } from './operations/operations.module'
 import { PackEndpointsModule } from './packs/pack-endpoints.module'
 import { PacksModule } from './packs/packs.module'
 import { PrismaService } from './prisma/prisma.service'
+import { PurchasingModule } from './purchasing/purchasing.module'
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, OperationsModule, PacksModule, PackEndpointsModule, GateModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, OperationsModule, PacksModule, PackEndpointsModule, GateModule, PurchasingModule],
   controllers: [HealthController],
   providers: [PrismaService, { provide: APP_GUARD, useClass: PermissionsGuard }],
   exports: [PrismaService],

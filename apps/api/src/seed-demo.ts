@@ -99,7 +99,9 @@ async function main(): Promise<void> {
         {
           id: id.roleStores, tenantId, code: 'STORE_EXECUTIVE', name: 'Store Executive',
           permissions: [
-            'purchase_order:read', 'goods_receipt:read', 'goods_receipt:post', 'stock:read',
+            // Can raise an order, cannot approve one. That separation is the point.
+            'purchase_order:read', 'purchase_order:submit',
+            'goods_receipt:read', 'goods_receipt:post', 'stock:read',
             'gate:read', 'gate:in', 'gate:weigh', 'gate:out',
           ],
         },
@@ -215,6 +217,46 @@ async function main(): Promise<void> {
         })
       }
       await tx.purchaseOrder.update({ where: { id: poId }, data: { totalAmount: total.toFixed(2) } })
+
+      // A second order left in DRAFT, so submit and approve can actually be
+      // exercised. Its value crosses the 1,00,000 band on purpose, which is
+      // where the approval matrix starts to matter.
+      const draftId = uid()
+      await tx.purchaseOrder.create({
+        data: {
+          id: draftId, tenantId, legalEntityId: id.legalEntity, plantId,
+          documentNo: null, supplierId: id.supplier, state: 'DRAFT',
+          orderDate: new Date('2026-09-12'), totalAmount: '0',
+        },
+      })
+      let draftTotal = 0
+      let draftLine = 0
+      for (const spec of factory.items.slice(0, 2)) {
+        draftLine++
+        const itemId = itemIds[spec.code]
+        if (itemId === undefined) continue
+        const quantity = draftLine * 800
+        const amount = (quantity * Number(spec.rate)).toFixed(2)
+        draftTotal += Number(amount)
+        await tx.purchaseOrderLine.create({
+          data: {
+            tenantId, purchaseOrderId: draftId, lineNo: draftLine, itemId,
+            quantity: String(quantity), rate: spec.rate, amount,
+          },
+        })
+      }
+      await tx.purchaseOrder.update({
+        where: { id: draftId }, data: { totalAmount: draftTotal.toFixed(2) },
+      })
+
+      // The released orders above were numbered by hand, so the series has to
+      // start after them. Leaving it at 1 made the first real release collide
+      // with a seeded number — the kind of defect that only shows up when
+      // someone actually uses the feature.
+      await tx.numberSeries.updateMany({
+        where: { seriesCode: 'PURCHASE_ORDER', fiscalYear: '2026-27' },
+        data: { nextValue: poSeq + 1 },
+      })
     }
 
     // ── industry packs ──────────────────────────────────────────────────────
@@ -302,6 +344,9 @@ async function main(): Promise<void> {
       '    carton.stores@prodx.demo  Carton Plant, Stores department, fewer rights',
       '',
       '    The two plant heads hold the SAME role and see different data.',
+      '',
+      '    Each factory has one RELEASED order and one DRAFT awaiting approval.',
+      '    carton.stores can submit but not approve — maker-checker.',
       '',
       '    Carton pack: INSTALLED, with data (uninstall will be refused).',
       '    Textile pack: not installed — install it from the Industry packs screen.',

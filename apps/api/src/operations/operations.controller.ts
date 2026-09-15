@@ -138,7 +138,7 @@ export class OperationsController {
           tenantId,
           legalEntityId: po.legalEntityId,
           plantId: po.plantId,
-          documentNo: '',
+          documentNo: null,
           purchaseOrderId: po.id,
           supplierId: po.supplierId,
           state: 'DRAFT',

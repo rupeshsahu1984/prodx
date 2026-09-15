@@ -743,7 +743,10 @@ model PurchaseOrder {
   legalEntityId String @db.Uuid @map("legal_entity_id")
   plantId       String @db.Uuid @map("plant_id")
 
-  documentNo String             @map("document_no")
+  /// Null until release. A document that has no number yet must not occupy one,
+  /// and Postgres permits many NULLs under a unique index — an empty-string
+  /// sentinel would collide the moment a second draft existed.
+  documentNo String?            @map("document_no")
   supplierId String             @db.Uuid @map("supplier_id")
   state      PurchaseOrderState @default(DRAFT)
 
@@ -755,6 +758,12 @@ model PurchaseOrder {
   /// be the submitter, not the creator — they can differ.
   submittedById String?   @db.Uuid @map("submitted_by_id")
   submittedAt   DateTime? @map("submitted_at") @db.Timestamptz(6)
+
+  /// Incremented on every submission. Approvals are recorded against the cycle
+  /// they were given for, so a rejection invalidates them without deleting
+  /// anything — an approval is a fact about who decided what, and the record is
+  /// append-only.
+  approvalCycle Int @default(1) @map("approval_cycle")
 
   /// Optimistic locking. Two buyers editing the same order must not silently
   /// overwrite each other.
@@ -834,13 +843,16 @@ model ApprovalRecord {
   documentId   String @db.Uuid @map("document_id")
   ruleId       String @db.Uuid @map("rule_id")
   approvedById String @db.Uuid @map("approved_by_id")
+  /// The submission this approval was given for. An approval from an earlier
+  /// cycle never counts towards a later one.
+  cycle        Int    @default(1)
   comment      String?
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   rule ApprovalRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
 
-  @@unique([tenantId, documentType, documentId, ruleId])
+  @@unique([tenantId, documentType, documentId, ruleId, cycle])
   @@index([tenantId, documentType, documentId])
   @@map("approval_record")
 }
@@ -924,7 +936,8 @@ model GoodsReceipt {
   legalEntityId String @db.Uuid @map("legal_entity_id")
   plantId       String @db.Uuid @map("plant_id")
 
-  documentNo      String            @map("document_no")
+  /// Null until posted, for the same reason as the purchase order.
+  documentNo      String?           @map("document_no")
   purchaseOrderId String            @db.Uuid @map("purchase_order_id")
   supplierId      String            @db.Uuid @map("supplier_id")
   state           GoodsReceiptState @default(DRAFT)
