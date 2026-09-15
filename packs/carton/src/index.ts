@@ -1,5 +1,7 @@
 import type { PackManifest } from '@prodx/pack-sdk'
 
+export * from './trim'
+
 /**
  * Corrugated carton.
  *

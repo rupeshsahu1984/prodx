@@ -26,6 +26,18 @@ export const IS_PUBLIC_KEY = 'prodx:public'
 /** No token needed at all: login, refresh, health. */
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true)
 
+export const REQUIRES_PACK_KEY = 'prodx:requires-pack'
+/**
+ * Marks a route as belonging to an industry pack.
+ *
+ * RLS already makes the pack's data invisible when the pack is off, so this is
+ * not the security boundary — it is the difference between an endpoint that
+ * returns a confusing empty list and one that says the pack is not installed.
+ * Defence in depth: if this decorator were forgotten, the caller would still
+ * see nothing.
+ */
+export const RequiresPack = (packId: string) => SetMetadata(REQUIRES_PACK_KEY, packId)
+
 export const ANY_AUTHENTICATED_KEY = 'prodx:any-authenticated'
 /**
  * A valid token is enough; no specific permission applies. For routes that only
@@ -45,6 +57,18 @@ export class PermissionsGuard implements CanActivate {
     const targets = [context.getHandler(), context.getClass()]
 
     if (this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, targets) === true) return true
+
+    const pack = this.reflector.getAllAndOverride<string>(REQUIRES_PACK_KEY, targets)
+    if (pack !== undefined) {
+      const { packScope } = currentContext()
+      const enabled = packScope === '*' || packScope.includes(pack)
+      if (!enabled) {
+        throw new ForbiddenException({
+          code: 'PACK_NOT_INSTALLED',
+          message: `The ${pack} industry pack is not installed for this tenant.`,
+        })
+      }
+    }
 
     if (this.reflector.getAllAndOverride<boolean>(ANY_AUTHENTICATED_KEY, targets) === true) {
       // Still requires a context, so an unauthenticated call throws here.

@@ -9,6 +9,7 @@ import {
   IS_PUBLIC_KEY,
   PERMISSION_KEY,
   PermissionsGuard,
+  REQUIRES_PACK_KEY,
 } from './permissions.guard'
 
 /** Minimal ExecutionContext — the guard only ever asks for handler and class. */
@@ -22,11 +23,11 @@ function guardWith(metadata: Record<string, unknown>): PermissionsGuard {
   return new PermissionsGuard(reflector)
 }
 
-const withPerms = <T>(permissions: string[], fn: () => T): T =>
+const withPerms = <T>(permissions: string[], fn: () => T, packs: string[] = []): T =>
   runWithContext(
     {
       tenantId: 't', userId: 'u', permissions,
-      plantScope: ALL_PLANTS, departmentIds: [], packScope: [],
+      plantScope: ALL_PLANTS, departmentIds: [], packScope: packs,
     },
     fn,
   )
@@ -71,6 +72,25 @@ describe('PermissionsGuard', () => {
   it('still requires a token for an any-authenticated route', () => {
     const guard = guardWith({ [ANY_AUTHENTICATED_KEY]: true })
     expect(() => guard.canActivate(ctx())).toThrow(/No request context/)
+  })
+
+  it('refuses a pack route when the pack is not installed', () => {
+    const guard = guardWith({ [REQUIRES_PACK_KEY]: 'textile', [PERMISSION_KEY]: 'textile_yarn:read' })
+    expect(() => withPerms(['*'], () => guard.canActivate(ctx()), ['carton'])).toThrow(
+      /textile industry pack is not installed/,
+    )
+  })
+
+  it('allows a pack route when the pack is installed and the permission held', () => {
+    const guard = guardWith({ [REQUIRES_PACK_KEY]: 'textile', [PERMISSION_KEY]: 'textile_yarn:read' })
+    expect(withPerms(['textile_yarn:read'], () => guard.canActivate(ctx()), ['textile'])).toBe(true)
+  })
+
+  it('checks the pack before the permission, so the clearer error wins', () => {
+    // "Pack not installed" is actionable; "missing permission" would send an
+    // operator looking for a role that does not exist yet.
+    const guard = guardWith({ [REQUIRES_PACK_KEY]: 'textile', [PERMISSION_KEY]: 'textile_yarn:read' })
+    expect(() => withPerms([], () => guard.canActivate(ctx()), [])).toThrow(/not installed/)
   })
 
   it('throws rather than defaulting when there is no request context', () => {
