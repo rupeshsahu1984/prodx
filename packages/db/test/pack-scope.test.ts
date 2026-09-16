@@ -1,6 +1,6 @@
 import type { Client } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { APP_URL, connect, OWNER_URL, setTenant, TENANT_A } from './helpers'
+import { APP_URL, connect, OWNER_URL, setTenant, TENANT_PACK_SCOPE } from './helpers'
 
 /**
  * Industry pack gating (ADR 0009) proven at the database.
@@ -9,8 +9,8 @@ import { APP_URL, connect, OWNER_URL, setTenant, TENANT_A } from './helpers'
  * pack hides its data everywhere at once — API, reports, background jobs — with
  * no application check that could be forgotten.
  */
-const PLANT = '01919000-0000-7000-8000-00000000f001'
-const LEGAL_ENTITY = '01919000-0000-7000-8000-00000000f0e1'
+const PLANT = '01919000-0000-7000-8000-00000000e001'
+const LEGAL_ENTITY = '01919000-0000-7000-8000-00000000e0e1'
 
 const setScope = async (c: Client, plants: string, packs: string): Promise<void> => {
   await c.query('SELECT set_config($1, $2, false)', ['app.plant_scope', plants])
@@ -28,28 +28,28 @@ describe('industry pack gating', () => {
     await owner.query(
       `INSERT INTO tenant (id, code, name, updated_at)
        VALUES ($1, 'T-PACK', 'Pack Tenant', now()) ON CONFLICT DO NOTHING`,
-      [TENANT_A],
+      [TENANT_PACK_SCOPE],
     )
-    await setTenant(owner, TENANT_A)
+    await setTenant(owner, TENANT_PACK_SCOPE)
     await setScope(owner, '*', '*')
     await owner.query(
       `INSERT INTO legal_entity (id, tenant_id, code, name, base_currency, updated_at)
        VALUES ($1, $2, 'LE-P', 'Pack LE', 'INR', now()) ON CONFLICT DO NOTHING`,
-      [LEGAL_ENTITY, TENANT_A],
+      [LEGAL_ENTITY, TENANT_PACK_SCOPE],
     )
     await owner.query(
       `INSERT INTO plant (id, tenant_id, legal_entity_id, code, name, updated_at)
        VALUES ($1, $2, $3, 'F-P', 'F-P', now()) ON CONFLICT DO NOTHING`,
-      [PLANT, TENANT_A, LEGAL_ENTITY],
+      [PLANT, TENANT_PACK_SCOPE, LEGAL_ENTITY],
     )
     await owner.query(
       `INSERT INTO carton_box_style
          (id, tenant_id, code, name, flute, ply, inner_length_mm, inner_width_mm, inner_height_mm, updated_at)
        VALUES (gen_random_uuid(), $1, 'BOX-TEST', 'Test box', 'BC', 5, 100, 100, 100, now())
        ON CONFLICT DO NOTHING`,
-      [TENANT_A],
+      [TENANT_PACK_SCOPE],
     )
-    await setTenant(app, TENANT_A)
+    await setTenant(app, TENANT_PACK_SCOPE)
   })
 
   afterAll(async () => {
@@ -89,7 +89,7 @@ describe('industry pack gating', () => {
         `INSERT INTO carton_box_style
            (id, tenant_id, code, name, flute, ply, inner_length_mm, inner_width_mm, inner_height_mm, updated_at)
          VALUES (gen_random_uuid(), $1, 'SNEAK', 'Sneak', 'B', 3, 10, 10, 10, now())`,
-        [TENANT_A],
+        [TENANT_PACK_SCOPE],
       ),
     ).rejects.toThrow(/row-level security/i)
   })
@@ -107,7 +107,7 @@ describe('industry pack gating', () => {
     await setTenant(app, '01919000-0000-7000-8000-00000000000b')
     const { rows } = await app.query('SELECT id FROM carton_box_style')
     expect(rows).toHaveLength(0)
-    await setTenant(app, TENANT_A)
+    await setTenant(app, TENANT_PACK_SCOPE)
   })
 
   it('gates every table each pack declares', async () => {

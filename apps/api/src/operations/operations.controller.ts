@@ -111,14 +111,23 @@ export class OperationsController {
     })
   }
 
-  /** Creates a draft receipt for every outstanding line on the order. */
+  /**
+   * Creates a draft receipt for every outstanding line on the order.
+   *
+   * When a gate event is supplied and the vehicle has been weighed, the
+   * weighbridge net becomes the receipt's secondary quantity for dual-UoM items
+   * (ADR 0004: the second quantity is MEASURED, never derived). Kraft liner is
+   * ordered in kilograms and consumed in metres — the weighbridge is the only
+   * honest source for the kilograms, and the difference between the measured
+   * weight and the theoretical one is exactly what a plant wants to see.
+   */
   @Post('purchase-orders/:id/receive')
   @RequirePermission('goods_receipt:post')
   @HttpCode(201)
   async createReceipt(
     @Param('id', ParseUUIDPipe) purchaseOrderId: string,
-    @Body() body: { postingDate?: string },
-  ): Promise<{ goodsReceiptId: string }> {
+    @Body() body: { postingDate?: string; gateEventId?: string },
+  ): Promise<{ goodsReceiptId: string; netWeightApplied: number | null }> {
     const { withScope } = await import('@prodx/db')
     const { tenantId } = currentContext()
 
@@ -133,6 +142,16 @@ export class OperationsController {
         throw new Error('Nothing outstanding on this order.')
       }
 
+      // The net weight of the load, when the vehicle went over the weighbridge.
+      let netWeight: number | null = null
+      if (body.gateEventId !== undefined) {
+        const ticket = await tx.weighbridgeTicket.findFirst({
+          where: { gateEventId: body.gateEventId },
+          orderBy: { weighedAt: 'desc' },
+        })
+        netWeight = ticket === null ? null : Number(ticket.netWeight)
+      }
+
       const grn = await tx.goodsReceipt.create({
         data: {
           tenantId,
@@ -143,8 +162,16 @@ export class OperationsController {
           supplierId: po.supplierId,
           state: 'DRAFT',
           postingDate: body.postingDate === undefined ? new Date() : new Date(body.postingDate),
+          gateEventId: body.gateEventId ?? null,
         },
       })
+
+      // One weighment covers the whole load, so it is split across the dual-UoM
+      // lines by value. With a single such line — the usual case — it simply all
+      // lands there. Lines that are not dual-UoM take no share: assigning weight
+      // to an item measured in pieces would be inventing a number.
+      const dualLines = outstanding.filter((l) => l.item.isDualUom)
+      const dualValue = dualLines.reduce((sum, l) => sum + Number(l.amount), 0)
 
       const location = await tx.storageLocation.findFirstOrThrow({
         where: { warehouse: { plantId: po.plantId } },
@@ -155,6 +182,12 @@ export class OperationsController {
         lineNo++
         const stockUnit = await tx.stockUnit.findFirstOrThrow({ where: { itemId: line.itemId } })
         const quantity = Number(line.quantity) - Number(line.receivedQuantity)
+
+        const share =
+          netWeight === null || !line.item.isDualUom || dualValue === 0
+            ? null
+            : (netWeight * Number(line.amount)) / dualValue
+
         await tx.goodsReceiptLine.create({
           data: {
             tenantId,
@@ -165,13 +198,14 @@ export class OperationsController {
             stockUnitId: stockUnit.id,
             storageLocationId: location.id,
             quantity: String(quantity),
+            secondaryQuantity: share === null ? null : share.toFixed(3),
             unitCost: line.rate.toString(),
             amount: (quantity * Number(line.rate)).toFixed(2),
           },
         })
       }
 
-      return { goodsReceiptId: grn.id }
+      return { goodsReceiptId: grn.id, netWeightApplied: dualLines.length === 0 ? null : netWeight }
     })
   }
 

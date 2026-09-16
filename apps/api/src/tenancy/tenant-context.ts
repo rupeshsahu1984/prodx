@@ -1,4 +1,4 @@
-import type { DbScope, PackScope, PlantScope } from '@prodx/db'
+import { ALL_DEPARTMENTS, type DbScope, type PackScope, type PlantScope } from '@prodx/db'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
 export interface RequestContext {
@@ -38,6 +38,15 @@ export const currentTenantId = (): string => currentContext().tenantId
 
 /** Everything the database needs to scope this request. */
 export function currentDbScope(): DbScope {
-  const { tenantId, plantScope, packScope } = currentContext()
-  return { tenantId, plants: plantScope, packs: packScope }
+  const { tenantId, plantScope, packScope, departmentIds } = currentContext()
+  return {
+    tenantId,
+    plants: plantScope,
+    packs: packScope,
+    // No department assignments means no department RESTRICTION — a plant head
+    // legitimately has none and must see every department of their plants. The
+    // decision is made here, explicitly, so that an empty scope reaching the
+    // database still means "nothing" and continues to fail closed.
+    departments: departmentIds.length === 0 ? ALL_DEPARTMENTS : departmentIds,
+  }
 }

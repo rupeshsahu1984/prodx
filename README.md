@@ -76,6 +76,19 @@ Then open **http://localhost:3000** and sign in:
 
 | | |
 |---|---|
+### Three scope dimensions, all enforced by RLS, all failing closed
+
+| | Setting | Empty means |
+|---|---|---|
+| Tenant | `app.tenant_id` | nothing |
+| Factory | `app.plant_scope` | nothing |
+| Department | `app.departments` | nothing |
+| Industry pack | `app.packs` | nothing |
+
+"No department assignments means every department" is resolved in the **auth layer**, which
+sends the explicit `*` for a plant head. The database never infers it from an empty setting —
+that would be a fail-open.
+
 | Tenant code | `DEMO` |
 | `admin@prodx.demo` | Superadmin — both factories |
 | `carton.head@prodx.demo` | Carton Plant only |
@@ -167,6 +180,8 @@ passwords, permissions, JWT, auth middleware, permission guard) and 20 integrati
   permission; a second person must act
 - a rejected order keeps its approval records (they are facts) but starts the next round with
   no signatures
+- a user scoped to one **department** sees that department's documents plus plant-wide ones,
+  and cannot read or write another department's even by exact id
 
 The integration suite deliberately **fails** rather than skipping when no database is present.
 

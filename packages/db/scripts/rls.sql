@@ -64,6 +64,22 @@ CREATE OR REPLACE FUNCTION app_packs() RETURNS text[] AS $$
   END
 $$ LANGUAGE sql STABLE;
 
+/**
+ * Departments within the plants already in scope.
+ *
+ * Same shape as the plant scope, and the asymmetry people expect is resolved
+ * upstream: a plant head has no department assignments and the auth layer sends
+ * the explicit '*' for them. Here, empty still means nothing, so an unset scope
+ * fails closed like everything else.
+ */
+CREATE OR REPLACE FUNCTION app_departments() RETURNS uuid[] AS $$
+  SELECT CASE
+    WHEN current_setting('app.departments', true) = '*' THEN NULL
+    WHEN coalesce(current_setting('app.departments', true), '') = '' THEN ARRAY[]::uuid[]
+    ELSE string_to_array(current_setting('app.departments', true), ',')::uuid[]
+  END
+$$ LANGUAGE sql STABLE;
+
 -- The pack catalogue lives in code. `sync-packs` copies it into pack_table so
 -- this script, which runs before any application process, can gate pack tables
 -- without a hardcoded list that would drift from the manifests.
@@ -89,6 +105,7 @@ DO $$
 DECLARE
   t          text;
   has_plant  boolean;
+  has_dept   boolean;
   owning_pack text;
   predicate  text;
 BEGIN
@@ -110,6 +127,14 @@ BEGIN
          AND a.attname = 'plant_id' AND NOT a.attisdropped
     ) INTO has_plant;
 
+    SELECT EXISTS (
+      SELECT 1 FROM pg_attribute a
+        JOIN pg_class c2 ON c2.oid = a.attrelid
+        JOIN pg_namespace n2 ON n2.oid = c2.relnamespace
+       WHERE n2.nspname = 'public' AND c2.relname = t
+         AND a.attname = 'department_id' AND NOT a.attisdropped
+    ) INTO has_dept;
+
     SELECT pack_id INTO owning_pack FROM pack_table WHERE table_name = t;
 
     IF t = 'plant' THEN
@@ -122,6 +147,16 @@ BEGIN
                          OR plant_id = ANY(app_plant_scope()))';
     ELSE
       predicate := 'tenant_id = app_tenant()';
+    END IF;
+
+    -- A document carrying a department is visible only to that department, and
+    -- a NULL department means it belongs to the plant as a whole. The
+    -- `department` table itself is scoped by its plant_id, not by this.
+    IF has_dept THEN
+      predicate := predicate || '
+                    AND (app_departments() IS NULL
+                         OR department_id IS NULL
+                         OR department_id = ANY(app_departments()))';
     END IF;
 
     -- A pack's own tables additionally require the pack to be enabled, so

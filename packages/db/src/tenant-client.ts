@@ -11,9 +11,11 @@ export const prisma = new PrismaClient()
  */
 export const ALL_PLANTS = '*' as const
 export const ALL_PACKS = '*' as const
+export const ALL_DEPARTMENTS = '*' as const
 
 export type PlantScope = typeof ALL_PLANTS | readonly string[]
 export type PackScope = typeof ALL_PACKS | readonly string[]
+export type DepartmentScope = typeof ALL_DEPARTMENTS | readonly string[]
 
 /**
  * Everything the database needs to decide what this caller may see.
@@ -29,9 +31,19 @@ export interface DbScope {
   plants: PlantScope
   /** Installed industry packs (ADR 0009). ALL_PACKS only for platform paths. */
   packs: PackScope
+  /**
+   * Departments within those factories.
+   *
+   * Note the asymmetry with plants, which is deliberate and decided in the auth
+   * layer rather than here: a plant head has no department assignments and must
+   * see every department of their plants, so auth resolves that to
+   * ALL_DEPARTMENTS explicitly. An empty list still means "nothing", so an
+   * unset scope fails closed exactly like the others.
+   */
+  departments: DepartmentScope
 }
 
-const serialize = (scope: PlantScope | PackScope): string =>
+const serialize = (scope: PlantScope | PackScope | DepartmentScope): string =>
   typeof scope === 'string' ? scope : scope.join(',')
 
 /**
@@ -53,14 +65,16 @@ const serialize = (scope: PlantScope | PackScope): string =>
 export function forScope(scope: DbScope) {
   const plants = serialize(scope.plants)
   const packs = serialize(scope.packs)
+  const departments = serialize(scope.departments)
   return prisma.$extends({
     query: {
       $allModels: {
         async $allOperations({ args, query }) {
-          const [, , , result] = await prisma.$transaction([
+          const [, , , , result] = await prisma.$transaction([
             prisma.$executeRaw`SELECT set_config('app.tenant_id', ${scope.tenantId}::text, true)`,
             prisma.$executeRaw`SELECT set_config('app.plant_scope', ${plants}, true)`,
             prisma.$executeRaw`SELECT set_config('app.packs', ${packs}, true)`,
+            prisma.$executeRaw`SELECT set_config('app.departments', ${departments}, true)`,
             query(args),
           ])
           return result
@@ -95,11 +109,13 @@ export async function withScope<T>(
 ): Promise<T> {
   const plants = serialize(scope.plants)
   const packs = serialize(scope.packs)
+  const departments = serialize(scope.departments)
   return prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${scope.tenantId}::text, true)`
       await tx.$executeRaw`SELECT set_config('app.plant_scope', ${plants}, true)`
       await tx.$executeRaw`SELECT set_config('app.packs', ${packs}, true)`
+      await tx.$executeRaw`SELECT set_config('app.departments', ${departments}, true)`
       return fn(tx)
     },
     { timeout: options?.timeoutMs ?? 15_000 },
@@ -111,4 +127,5 @@ export const platformScope = (tenantId: string): DbScope => ({
   tenantId,
   plants: ALL_PLANTS,
   packs: ALL_PACKS,
+  departments: ALL_DEPARTMENTS,
 })

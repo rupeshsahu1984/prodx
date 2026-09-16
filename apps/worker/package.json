@@ -7,7 +7,7 @@
     "dev": "node --watch dist/main.js",
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
     "@prodx/core": "workspace:*",
@@ -15,5 +15,9 @@
     "bullmq": "^5.34.6",
     "ioredis": "^5.4.2"
   },
-  "devDependencies": { "@types/node": "^22.10.5", "typescript": "^5.7.2", "vitest": "^2.1.8" }
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
 }

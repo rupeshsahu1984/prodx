@@ -1,11 +1,19 @@
-import { ALL_PACKS, ALL_PLANTS, platformScope, prisma, withScope, type DbScope } from '@prodx/db'
+import {
+  ALL_DEPARTMENTS,
+  ALL_PACKS,
+  ALL_PLANTS,
+  platformScope,
+  prisma,
+  withScope,
+  type DbScope,
+} from '@prodx/db'
 import { randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 import { PurchasingService, type Actor } from '../src/purchasing/purchasing.service'
 import { seedScenario } from './seed'
 
 const purchasing = new PurchasingService()
-const scopeFor = (tenantId: string): DbScope => ({ tenantId, plants: ALL_PLANTS, packs: ALL_PACKS })
+const scopeFor = (tenantId: string): DbScope => ({ tenantId, plants: ALL_PLANTS, packs: ALL_PACKS, departments: ALL_DEPARTMENTS })
 
 const MAKER = randomUUID()
 const CHECKER = randomUUID()

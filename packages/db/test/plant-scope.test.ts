@@ -1,6 +1,6 @@
 import type { Client } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { APP_URL, connect, OWNER_URL, setTenant, TENANT_A } from './helpers'
+import { APP_URL, connect, OWNER_URL, setTenant, TENANT_PLANT_SCOPE } from './helpers'
 
 /**
  * Plant scope (ADR 0003, gap 1) proven at the database.
@@ -28,28 +28,28 @@ describe('plant scope', () => {
     await owner.query(
       `INSERT INTO tenant (id, code, name, updated_at)
        VALUES ($1, 'T-SCOPE', 'Scope Tenant', now()) ON CONFLICT DO NOTHING`,
-      [TENANT_A],
+      [TENANT_PLANT_SCOPE],
     )
-    await setTenant(owner, TENANT_A)
+    await setTenant(owner, TENANT_PLANT_SCOPE)
     await setScope(owner, '*')
     await owner.query(
       `INSERT INTO legal_entity (id, tenant_id, code, name, base_currency, updated_at)
        VALUES ($1, $2, 'LE-S', 'Scope LE', 'INR', now()) ON CONFLICT DO NOTHING`,
-      [LEGAL_ENTITY, TENANT_A],
+      [LEGAL_ENTITY, TENANT_PLANT_SCOPE],
     )
     for (const [id, code] of [[PLANT_A, 'F-A'], [PLANT_B, 'F-B']] as const) {
       await owner.query(
         `INSERT INTO plant (id, tenant_id, legal_entity_id, code, name, updated_at)
          VALUES ($1, $2, $3, $4, $4, now()) ON CONFLICT DO NOTHING`,
-        [id, TENANT_A, LEGAL_ENTITY, code],
+        [id, TENANT_PLANT_SCOPE, LEGAL_ENTITY, code],
       )
       await owner.query(
         `INSERT INTO warehouse (id, tenant_id, plant_id, code, name, updated_at)
          VALUES (gen_random_uuid(), $1, $2, $3, $3, now()) ON CONFLICT DO NOTHING`,
-        [TENANT_A, id, `WH-${code}`],
+        [TENANT_PLANT_SCOPE, id, `WH-${code}`],
       )
     }
-    await setTenant(app, TENANT_A)
+    await setTenant(app, TENANT_PLANT_SCOPE)
   })
 
   afterAll(async () => {
@@ -101,7 +101,7 @@ describe('plant scope', () => {
       app.query(
         `INSERT INTO warehouse (id, tenant_id, plant_id, code, name, updated_at)
          VALUES (gen_random_uuid(), $1, $2, 'SNEAK', 'Sneak', now())`,
-        [TENANT_A, PLANT_B],
+        [TENANT_PLANT_SCOPE, PLANT_B],
       ),
     ).rejects.toThrow(/row-level security/i)
   })
@@ -114,7 +114,7 @@ describe('plant scope', () => {
       `INSERT INTO approval_rule
          (id, tenant_id, document_type, min_amount, max_amount, plant_id, permission, sequence, updated_at)
        VALUES (gen_random_uuid(), $1, 'SCOPE_TEST', 0, NULL, NULL, 'x:y', 1, now())`,
-      [TENANT_A],
+      [TENANT_PLANT_SCOPE],
     )
     const { rows } = await app.query(
       `SELECT id FROM approval_rule WHERE document_type = 'SCOPE_TEST'`,
@@ -128,6 +128,6 @@ describe('plant scope', () => {
     await setTenant(app, '01919000-0000-7000-8000-00000000000b')
     const { rows } = await app.query('SELECT id FROM plant WHERE id = $1', [PLANT_A])
     expect(rows).toHaveLength(0)
-    await setTenant(app, TENANT_A)
+    await setTenant(app, TENANT_PLANT_SCOPE)
   })
 })

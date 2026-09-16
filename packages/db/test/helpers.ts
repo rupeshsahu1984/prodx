@@ -28,6 +28,16 @@ export const TENANT_A = '01919000-0000-7000-8000-00000000000a'
 export const TENANT_B = '01919000-0000-7000-8000-00000000000b'
 
 /**
+ * Suites that create their own plants and documents get their own tenant.
+ * Sharing TENANT_A once meant a fixture added by a new suite silently changed
+ * what an older suite counted — the tests were coupled through data, which is
+ * the least obvious kind of coupling to debug.
+ */
+export const TENANT_PLANT_SCOPE = '01919000-0000-7000-8000-0000000000f1'
+export const TENANT_PACK_SCOPE = '01919000-0000-7000-8000-0000000000f2'
+export const TENANT_DEPT_SCOPE = '01919000-0000-7000-8000-0000000000f3'
+
+/**
  * Two tenants, each with one item.
  *
  * Note the setTenant call inside the loop: FORCE ROW LEVEL SECURITY means even

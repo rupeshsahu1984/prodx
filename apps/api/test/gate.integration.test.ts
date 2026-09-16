@@ -1,4 +1,12 @@
-import { ALL_PACKS, ALL_PLANTS, platformScope, prisma, withScope, type DbScope } from '@prodx/db'
+import {
+  ALL_DEPARTMENTS,
+  ALL_PACKS,
+  ALL_PLANTS,
+  platformScope,
+  prisma,
+  withScope,
+  type DbScope,
+} from '@prodx/db'
 import { randomUUID } from 'node:crypto'
 import { afterAll, describe, expect, it } from 'vitest'
 import { GateService } from '../src/gate/gate.service'
@@ -8,7 +16,7 @@ import { seedScenario } from './seed'
 const gate = new GateService()
 const posting = new PostingService()
 
-const scopeFor = (tenantId: string): DbScope => ({ tenantId, plants: ALL_PLANTS, packs: ALL_PACKS })
+const scopeFor = (tenantId: string): DbScope => ({ tenantId, plants: ALL_PLANTS, packs: ALL_PACKS, departments: ALL_DEPARTMENTS })
 const device = (source = 'GATE_SCANNER_A') => ({ deviceSource: source, deviceRef: randomUUID() })
 
 afterAll(async () => {

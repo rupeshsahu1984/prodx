@@ -90,12 +90,57 @@ export default function Page() {
     try { setToken(sessionStorage.getItem('prodx.token')) } catch { /* private mode */ }
   }, [])
 
+  /**
+   * Access tokens last fifteen minutes so a revoked role takes effect quickly.
+   * Without this the screen simply died mid-task. On a 401 the refresh token is
+   * exchanged once and the original request replayed; if that fails the session
+   * really is over and we sign out rather than looping.
+   */
+  const refresh = useCallback(async (): Promise<string | null> => {
+    let stored: string | null = null
+    try { stored = sessionStorage.getItem('prodx.refresh') } catch { /* private mode */ }
+    if (stored === null) return null
+
+    const res = await fetch(`${API}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ refreshToken: stored }),
+    })
+    if (!res.ok) return null
+
+    const pair = (await res.json()) as { accessToken: string; refreshToken: string }
+    try {
+      sessionStorage.setItem('prodx.token', pair.accessToken)
+      // Refresh tokens rotate: keeping the old one would make the next refresh
+      // look like token reuse, which revokes the whole family.
+      sessionStorage.setItem('prodx.refresh', pair.refreshToken)
+    } catch { /* private mode */ }
+    setToken(pair.accessToken)
+    return pair.accessToken
+  }, [])
+
   const call = useCallback(
     async (path: string, init?: RequestInit): Promise<unknown> => {
-      const res = await fetch(`${API}${path}`, {
-        ...init,
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${token ?? ''}`, ...init?.headers },
-      })
+      const send = async (bearer: string): Promise<Response> =>
+        fetch(`${API}${path}`, {
+          ...init,
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${bearer}`,
+            ...init?.headers,
+          },
+        })
+
+      let res = await send(token ?? '')
+      if (res.status === 401) {
+        const fresh = await refresh()
+        if (fresh === null) {
+          signOut()
+          throw new Error('Your session has ended. Sign in again.')
+        }
+        res = await send(fresh)
+      }
+
       const body: unknown = res.status === 204 ? null : await res.json().catch(() => null)
       if (!res.ok) {
         const message = (body as { message?: string } | null)?.message
@@ -103,7 +148,7 @@ export default function Page() {
       }
       return body
     },
-    [token],
+    [token, refresh],
   )
 
   const load = useCallback(async () => {
@@ -131,14 +176,16 @@ export default function Page() {
       } else { setDyeLots([]); setFabrics([]) }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-      if (String(e).includes('401') || String(e).includes('valid')) signOut()
     }
   }, [token, call])
 
   useEffect(() => { void load() }, [load])
 
   function signOut() {
-    try { sessionStorage.removeItem('prodx.token') } catch { /* ignore */ }
+    try {
+      sessionStorage.removeItem('prodx.token')
+      sessionStorage.removeItem('prodx.refresh')
+    } catch { /* ignore */ }
     setToken(null); setMe(null)
   }
 
@@ -178,7 +225,19 @@ export default function Page() {
     finally { setBusy(false) }
   }
 
-  if (token === null) return <Login onToken={(t) => { try { sessionStorage.setItem('prodx.token', t) } catch { /* ignore */ } setToken(t) }} />
+  if (token === null) {
+    return (
+      <Login
+        onToken={(pair) => {
+          try {
+            sessionStorage.setItem('prodx.token', pair.accessToken)
+            sessionStorage.setItem('prodx.refresh', pair.refreshToken)
+          } catch { /* private mode */ }
+          setToken(pair.accessToken)
+        }}
+      />
+    )
+  }
 
   const posted = grns.filter((g) => g.state === 'POSTED').length
   const stockValue = stock?.valuations.reduce((s, v) => s + Number(v.totalValue), 0) ?? 0
@@ -677,7 +736,9 @@ const DEMO_USERS = [
   { email: 'carton.stores@prodx.demo', label: 'Store Executive', detail: 'Carton Plant · Stores' },
 ] as const
 
-function Login({ onToken }: { onToken: (token: string) => void }) {
+interface TokenPair { accessToken: string; refreshToken: string }
+
+function Login({ onToken }: { onToken: (pair: TokenPair) => void }) {
   const [tenantCode, setTenantCode] = useState('DEMO')
   const [email, setEmail] = useState<string>(DEMO_USERS[0].email)
   const [password, setPassword] = useState('prodx-demo-2026')
@@ -694,7 +755,7 @@ function Login({ onToken }: { onToken: (token: string) => void }) {
       })
       const body: unknown = await res.json().catch(() => null)
       if (!res.ok) throw new Error((body as { message?: string } | null)?.message ?? 'Sign in failed')
-      onToken((body as { accessToken: string }).accessToken)
+      onToken(body as TokenPair)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally { setBusy(false) }

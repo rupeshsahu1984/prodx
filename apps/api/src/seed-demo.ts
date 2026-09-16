@@ -153,6 +153,7 @@ async function main(): Promise<void> {
 
     const plantIds: Record<string, string> = {}
     const itemIds: Record<string, string> = {}
+    const deptIds: Record<string, string> = {}
     const storesDept: Record<string, string> = {}
     let poSeq = 0
 
@@ -173,6 +174,7 @@ async function main(): Promise<void> {
       for (const dept of DEPARTMENTS) {
         const departmentId = uid()
         if (dept === 'STORES') storesDept[factory.code] = departmentId
+        deptIds[`${factory.code}:${dept}`] = departmentId
         await tx.department.create({
           data: { id: departmentId, tenantId, plantId, code: dept, name: dept.charAt(0) + dept.slice(1).toLowerCase() },
         })
@@ -185,6 +187,9 @@ async function main(): Promise<void> {
           id: poId, tenantId, legalEntityId: id.legalEntity, plantId,
           documentNo: `PO/2026-27/${String(poSeq).padStart(4, '0')}`,
           supplierId: id.supplier, state: 'RELEASED',
+          // Raised by purchase, so a store executive scoped to STORES does not
+          // see it — which is the department restriction being demonstrated.
+          departmentId: deptIds[`${factory.code}:PURCHASE`] ?? null,
           orderDate: new Date('2026-09-05'), totalAmount: '0',
         },
       })
@@ -226,6 +231,9 @@ async function main(): Promise<void> {
         data: {
           id: draftId, tenantId, legalEntityId: id.legalEntity, plantId,
           documentNo: null, supplierId: id.supplier, state: 'DRAFT',
+          // Left plant-wide on purpose: everyone scoped to the plant can act on
+          // it, which is what makes the maker-checker demo reachable.
+          departmentId: null,
           orderDate: new Date('2026-09-12'), totalAmount: '0',
         },
       })
@@ -347,6 +355,7 @@ async function main(): Promise<void> {
       '',
       '    Each factory has one RELEASED order and one DRAFT awaiting approval.',
       '    carton.stores can submit but not approve — maker-checker.',
+      '    The released order belongs to PURCHASE, so carton.stores cannot see it.',
       '',
       '    Carton pack: INSTALLED, with data (uninstall will be refused).',
       '    Textile pack: not installed — install it from the Industry packs screen.',

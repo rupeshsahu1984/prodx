@@ -750,6 +750,10 @@ model PurchaseOrder {
   supplierId String             @db.Uuid @map("supplier_id")
   state      PurchaseOrderState @default(DRAFT)
 
+  /// The department that raised it. Null means it belongs to the plant as a
+  /// whole and everyone scoped to that plant can see it.
+  departmentId String? @db.Uuid @map("department_id")
+
   orderDate   DateTime @map("order_date") @db.Date
   totalAmount Decimal  @default(0) @map("total_amount") @db.Decimal(18, 2)
   currency    String   @default("INR") @db.Char(3)
@@ -877,6 +881,9 @@ model GateEvent {
   /// The business document the vehicle is here for, when known at the gate.
   purchaseOrderId String? @db.Uuid @map("purchase_order_id")
 
+  /// Usually security. Null means plant-wide.
+  departmentId String? @db.Uuid @map("department_id")
+
   occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
   /// The scanner or terminal's own reference. Unique per source so a double-tap
   /// or a retry cannot create a second event (gap 8).
@@ -939,6 +946,8 @@ model GoodsReceipt {
   /// Null until posted, for the same reason as the purchase order.
   documentNo      String?           @map("document_no")
   purchaseOrderId String            @db.Uuid @map("purchase_order_id")
+  /// Usually stores. Null means plant-wide.
+  departmentId    String?           @db.Uuid @map("department_id")
   supplierId      String            @db.Uuid @map("supplier_id")
   state           GoodsReceiptState @default(DRAFT)
 

@@ -1,5 +1,12 @@
 import { ConflictException } from '@nestjs/common'
-import { ALL_PACKS, ALL_PLANTS, platformScope, prisma, withScope } from '@prodx/db'
+import {
+  ALL_DEPARTMENTS,
+  ALL_PACKS,
+  ALL_PLANTS,
+  platformScope,
+  prisma,
+  withScope,
+} from '@prodx/db'
 import { afterAll, describe, expect, it } from 'vitest'
 import { PostingService, type PostingActor } from '../src/posting/posting.service'
 import { seedScenario } from './seed'
@@ -10,7 +17,7 @@ const posting = new PostingService()
 const actorFor = (tenantId: string): PostingActor => ({
   actorId: '01919000-0000-7000-8000-00000000aaaa',
   permissions: ['goods_receipt:post', 'goods_receipt:reverse'],
-  scope: { tenantId, plants: ALL_PLANTS, packs: ALL_PACKS },
+  scope: { tenantId, plants: ALL_PLANTS, packs: ALL_PACKS, departments: ALL_DEPARTMENTS },
   canPostAdjustments: false,
 })
 
