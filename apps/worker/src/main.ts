@@ -1,5 +1,4 @@
-import { prisma } from '@prodx/db'
-import { dispatchOutboxBatch } from './outbox-dispatcher'
+import { dispatchOutboxBatch, workerPrisma } from './outbox-dispatcher'
 import { registry } from './handlers'
 
 const IDLE_POLL_MS = 2000
@@ -33,7 +32,7 @@ async function main(): Promise<void> {
     }
   }
 
-  await prisma.$disconnect()
+  await workerPrisma.$disconnect()
 }
 
 void main()

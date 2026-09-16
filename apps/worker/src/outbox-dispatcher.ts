@@ -1,6 +1,27 @@
 import { leaseUntil, nextAttempt } from '@prodx/core'
-import { prisma } from '@prodx/db'
+import { PrismaClient } from '@prodx/db'
 import { registry, UnhandledTopicError, type HandlerRegistry } from './handlers'
+
+/**
+ * The worker's own connection, as prodx_worker.
+ *
+ * It cannot use the request-path client: that connects as prodx_app, and a
+ * connection with no tenant context sees nothing under RLS — including as the
+ * owner, because every table is FORCEd. The worker has to find work before it
+ * knows whose work it is, so it needs the deliberate cross-tenant role from
+ * ADR 0002. Falling back to DATABASE_URL would reintroduce the silent
+ * delivers-nothing bug, so a missing URL is a startup failure instead.
+ */
+const workerUrl = process.env['DATABASE_WORKER_URL']
+if (workerUrl === undefined || workerUrl === '') {
+  throw new Error(
+    'DATABASE_WORKER_URL must be set. The outbox worker needs the cross-tenant ' +
+      'role; with the application role it would see no messages and deliver nothing.',
+  )
+}
+export const workerPrisma: PrismaClient = new PrismaClient({
+  datasources: { db: { url: workerUrl } },
+})
 
 /**
  * Transactional outbox delivery (gap 9).
@@ -31,7 +52,7 @@ export async function dispatchOutboxBatch(
   handlers: HandlerRegistry = registry,
   now: Date = new Date(),
 ): Promise<DispatchSummary> {
-  const claimed = await prisma.$queryRaw<
+  const claimed = await workerPrisma.$queryRaw<
     Array<{ id: string; topic: string; payload: unknown; attempts: number }>
   >`
     UPDATE outbox_message
@@ -51,7 +72,7 @@ export async function dispatchOutboxBatch(
   for (const message of claimed) {
     try {
       await handlers.deliver(message.topic, message.payload)
-      await prisma.outboxMessage.update({
+      await workerPrisma.outboxMessage.update({
         where: { id: message.id },
         data: { status: 'SENT', sentAt: new Date(), lastError: null },
       })
@@ -62,7 +83,7 @@ export async function dispatchOutboxBatch(
         ? { status: 'DEAD' as const, availableAt: now, exhausted: true }
         : nextAttempt(message.attempts, now)
 
-      await prisma.outboxMessage.update({
+      await workerPrisma.outboxMessage.update({
         where: { id: message.id },
         data: {
           status: decision.status,

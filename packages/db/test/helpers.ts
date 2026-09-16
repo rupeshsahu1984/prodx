@@ -8,6 +8,11 @@ export const APP_URL =
   process.env['TEST_APP_DATABASE_URL'] ??
   'postgresql://prodx_app:prodx_test_pw@localhost:5432/prodx_test'
 
+/** The deliberate cross-tenant role. Only the outbox worker uses it. */
+export const WORKER_URL =
+  process.env['TEST_WORKER_DATABASE_URL'] ??
+  'postgresql://prodx_worker:prodx_test_pw@localhost:5432/prodx_test'
+
 export async function connect(url: string): Promise<Client> {
   const client = new Client({ connectionString: url })
   await client.connect()

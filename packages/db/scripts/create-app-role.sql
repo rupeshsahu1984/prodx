@@ -28,3 +28,21 @@ SELECT format('CREATE ROLE prodx_app LOGIN PASSWORD %L', :'app_password')
 SELECT format('ALTER ROLE prodx_app PASSWORD %L', :'app_password')
  WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'prodx_app')
 \gexec
+
+-- The deliberate cross-tenant role ADR 0002 anticipated.
+--
+-- The outbox worker has to FIND work before it knows whose work it is: it scans
+-- for pending messages across every tenant, then processes each one inside that
+-- tenant's own scope. Under RLS a connection with no tenant context sees
+-- nothing — including as the owner, because tables are FORCEd — so without this
+-- the worker silently delivered nothing at all.
+--
+-- BYPASSRLS is granted to this role and to nothing else. It is used for the
+-- claim query and for no business read.
+SELECT format('CREATE ROLE prodx_worker LOGIN BYPASSRLS PASSWORD %L', :'app_password')
+ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'prodx_worker')
+\gexec
+
+SELECT format('ALTER ROLE prodx_worker LOGIN BYPASSRLS PASSWORD %L', :'app_password')
+ WHERE EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'prodx_worker')
+\gexec

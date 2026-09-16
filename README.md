@@ -66,6 +66,8 @@ psql "$DATABASE_MIGRATION_URL" -v app_password="$PRODX_APP_PASSWORD" \
      -f packages/db/scripts/create-app-role.sql
 psql "$DATABASE_MIGRATION_URL" -f packages/db/scripts/rls.sql
 
+pnpm --filter @prodx/worker build && pnpm --filter @prodx/worker start   # outbox delivery
+
 # demo tenant you can sign into
 pnpm --filter @prodx/api build && pnpm --filter @prodx/api seed:demo
 
@@ -130,6 +132,9 @@ every tenant can read every other tenant's data. It:
 
 - asserts the non-owner `prodx_app` role exists (created by `create-app-role.sql`,
   which requires a password to be supplied rather than carrying one),
+- grants the outbox worker's `prodx_worker` role, the **only** login role with `BYPASSRLS` —
+  it has to find pending work before it knows whose work it is, and a connection with no tenant
+  context sees nothing, including as the owner,
 - enables **and forces** row level security on every table with a `tenant_id`,
 - installs append-only triggers on the stock ledger, genealogy, journal and audit tables.
 
