@@ -1,118 +1,95 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { holds, NAV, type NavItem } from './nav'
 
 const API = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3001'
 
 interface Scoped { id: string; code: string; name: string }
 interface Me {
   userId: string; email: string; displayName: string; permissions: string[]
-  isSuperAdmin: boolean; plants: Scoped[]; departments: Scoped[]
+  isSuperAdmin: boolean; plants: Scoped[]; departments: Scoped[]; packs: string[]
 }
-
-/**
- * The 15 domains of the prototype. `live` marks what is actually wired to the
- * database today — the rest is the roadmap, shown rather than hidden so the
- * shape of the product is visible from the first screen.
- */
-const DOMAINS: { name: string; modules: number; live?: number; perm?: string }[] = [
-  { name: 'Home & Control Tower', modules: 4 },
-  { name: 'Enterprise & Master Data', modules: 8, live: 3 },
-  { name: 'CRM, Costing & Sales', modules: 8 },
-  { name: 'Planning & Scheduling', modules: 8 },
-  { name: 'Procurement & Supplier', modules: 8, live: 3, perm: 'purchase_order:read' },
-  { name: 'Inventory, Warehouse & Logistics', modules: 10, live: 2, perm: 'stock:read' },
-  { name: 'Gate, Security & Weighbridge', modules: 12, perm: 'gate:read' },
-  { name: 'Shared Manufacturing & MES', modules: 10 },
-  { name: 'Textile Manufacturing Pack', modules: 12 },
-  { name: 'Carton & Corrugated Pack', modules: 12 },
-  { name: 'Quality Management', modules: 9 },
-  { name: 'Maintenance & Utilities', modules: 8 },
-  { name: 'Finance, Cost & Compliance', modules: 15, live: 1, perm: 'stock:read' },
-  { name: 'People, Safety & Sustainability', modules: 17 },
-  { name: 'Reports, AI & Administration', modules: 10 },
-]
 interface Line { id: string; lineNo: number; quantity: string; receivedQuantity: string; rate: string; amount: string; item: { code: string; name: string } }
 interface PO { id: string; plantId: string; documentNo: string | null; state: string; totalAmount: string; supplier: { name: string }; plant: { code: string }; lines: Line[] }
-interface GRN { id: string; documentNo: string | null; state: string; postingDate: string; purchaseOrder: { documentNo: string }; lines: { id: string; quantity: string; amount: string; item: { code: string } }[] }
+interface GRN { id: string; documentNo: string | null; state: string; postingDate: string; purchaseOrder: { documentNo: string | null }; lines: { id: string; quantity: string; secondaryQuantity: string | null; amount: string; item: { code: string } }[] }
 interface Stock {
-  balances: { id: string; quantity: string; stockUnit: { reference: string; item: { code: string; name: string } }; storageLocation: { code: string } }[]
+  balances: unknown[]
   valuations: { id: string; quantityOnHand: string; totalValue: string; unitCost: string; item: { code: string; name: string } }[]
 }
+interface LedgerRow { id: string; direction: string; quantity: string; unitCost: string; totalValue: string; postingDate: string; sourceType: string; item: { code: string } }
 interface JournalLine { id: string; debit: string; credit: string; glAccount: { code: string; name: string } }
-interface Pack {
-  id: string; name: string; version: string; description: string
-  state: 'NOT_INSTALLED' | 'INSTALLED' | 'DISABLED'
-  moduleCount: number; permissionCount: number; rowCount: number
-}
-interface NavEntry { group: string; label: string; path: string; permission: string }
+interface Journal { id: string; documentNo: string; sourceType: string; lines: JournalLine[] }
+interface Pack { id: string; name: string; version: string; description: string; state: 'NOT_INSTALLED' | 'INSTALLED' | 'DISABLED'; moduleCount: number; permissionCount: number; rowCount: number }
 interface Tool { id: string; code: string; name: string; toolType: string; customerOwned: boolean; currentImpressions: number; lifeLimit: number | null; lifeUsedPct: number | null }
 interface BoardSpec { id: string; gsm: number; burstFactor: string | null; deckleMm: number; item: { code: string; name: string } }
-interface DyeLot { id: string; documentNo: string; colourCode: string; shadeBand: string; labDipRef: string | null; lotDate: string }
 interface FabricSpec { id: string; gsm: number; widthInch: string; construction: string | null; item: { code: string; name: string } }
-interface TrimSlot { orderId: string; ups: number }
-interface TrimPattern { combination: TrimSlot[]; usedMm: number; trimMm: number; trimPct: number; runMetres: number }
+interface DyeLot { id: string; documentNo: string; colourCode: string; shadeBand: string; labDipRef: string | null; lotDate: string }
 interface Weighment { gross: number; tare: number; net: number }
-interface InsideVehicle {
-  gateEventId: string; vehicleNo: string; driverName: string | null; plant: string
-  purchaseOrder: string | null; occurredAt: string; minutesInside: number; weighments: Weighment[]
-}
+interface InsideVehicle { gateEventId: string; vehicleNo: string; driverName: string | null; plant: string; purchaseOrder: string | null; minutesInside: number; weighments: Weighment[] }
+interface TrimPattern { combination: { orderId: string; ups: number }[]; usedMm: number; trimMm: number; trimPct: number; runMetres: number }
 interface TrimResult { deckleMm: number; patterns: TrimPattern[]; averageTrimPct: number; totalMetres: number; unfulfilled: { orderId: string; remainingMetres: number }[] }
-interface Journal { id: string; documentNo: string; narration: string | null; sourceType: string; lines: JournalLine[] }
+interface TokenPair { accessToken: string; refreshToken: string }
 
-const money = (v: string) => `₹ ${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-const qty = (v: string) => Number(v).toLocaleString('en-IN')
+const money = (v: string | number) => `₹ ${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+const qty = (v: string | number) => Number(v).toLocaleString('en-IN')
 
 export default function Page() {
   const [token, setToken] = useState<string | null>(null)
+  const [view, setView] = useState('overview')
   const [me, setMe] = useState<Me | null>(null)
   const [pos, setPos] = useState<PO[]>([])
   const [grns, setGrns] = useState<GRN[]>([])
   const [stock, setStock] = useState<Stock | null>(null)
+  const [ledger, setLedger] = useState<LedgerRow[]>([])
   const [journal, setJournal] = useState<Journal[]>([])
   const [packs, setPacks] = useState<Pack[]>([])
-  const [packNav, setPackNav] = useState<NavEntry[]>([])
+  const [inside, setInside] = useState<InsideVehicle[]>([])
   const [tools, setTools] = useState<Tool[]>([])
   const [boards, setBoards] = useState<BoardSpec[]>([])
-  const [dyeLots, setDyeLots] = useState<DyeLot[]>([])
   const [fabrics, setFabrics] = useState<FabricSpec[]>([])
+  const [dyeLots, setDyeLots] = useState<DyeLot[]>([])
   const [trim, setTrim] = useState<TrimResult | null>(null)
-  const [inside, setInside] = useState<InsideVehicle[]>([])
-  const [gateVehicle, setGateVehicle] = useState('MH12AB1234')
-  const [gateDriver, setGateDriver] = useState('R. Kumar')
   const [deckle, setDeckle] = useState('1600')
   const [trimOrders, setTrimOrders] = useState('780 x 1000\n790 x 1000\n650 x 400')
+  const [gateVehicle, setGateVehicle] = useState('MH12AB1234')
+  const [gateDriver, setGateDriver] = useState('R. Kumar')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => {
     try { setToken(sessionStorage.getItem('prodx.token')) } catch { /* private mode */ }
   }, [])
 
+  function signOut() {
+    try {
+      sessionStorage.removeItem('prodx.token')
+      sessionStorage.removeItem('prodx.refresh')
+    } catch { /* ignore */ }
+    setToken(null); setMe(null)
+  }
+
   /**
    * Access tokens last fifteen minutes so a revoked role takes effect quickly.
-   * Without this the screen simply died mid-task. On a 401 the refresh token is
-   * exchanged once and the original request replayed; if that fails the session
-   * really is over and we sign out rather than looping.
+   * On a 401 the refresh token is exchanged once and the request replayed; the
+   * rotated token replaces the stored one, since keeping the old one would look
+   * like reuse and revoke the whole family.
    */
   const refresh = useCallback(async (): Promise<string | null> => {
     let stored: string | null = null
     try { stored = sessionStorage.getItem('prodx.refresh') } catch { /* private mode */ }
     if (stored === null) return null
-
     const res = await fetch(`${API}/auth/refresh`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ refreshToken: stored }),
     })
     if (!res.ok) return null
-
-    const pair = (await res.json()) as { accessToken: string; refreshToken: string }
+    const pair = (await res.json()) as TokenPair
     try {
       sessionStorage.setItem('prodx.token', pair.accessToken)
-      // Refresh tokens rotate: keeping the old one would make the next refresh
-      // look like token reuse, which revokes the whole family.
       sessionStorage.setItem('prodx.refresh', pair.refreshToken)
     } catch { /* private mode */ }
     setToken(pair.accessToken)
@@ -121,26 +98,17 @@ export default function Page() {
 
   const call = useCallback(
     async (path: string, init?: RequestInit): Promise<unknown> => {
-      const send = async (bearer: string): Promise<Response> =>
+      const send = (bearer: string) =>
         fetch(`${API}${path}`, {
           ...init,
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${bearer}`,
-            ...init?.headers,
-          },
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}`, ...init?.headers },
         })
-
       let res = await send(token ?? '')
       if (res.status === 401) {
         const fresh = await refresh()
-        if (fresh === null) {
-          signOut()
-          throw new Error('Your session has ended. Sign in again.')
-        }
+        if (fresh === null) { signOut(); throw new Error('Your session has ended. Sign in again.') }
         res = await send(fresh)
       }
-
       const body: unknown = res.status === 204 ? null : await res.json().catch(() => null)
       if (!res.ok) {
         const message = (body as { message?: string } | null)?.message
@@ -154,69 +122,31 @@ export default function Page() {
   const load = useCallback(async () => {
     if (token === null) return
     try {
-      const [meRes, poRes, grnRes, stockRes, jRes, packRes, navRes, insideRes] = await Promise.all([
+      const [meRes, poRes, grnRes, stockRes, ledgerRes, jRes, packRes, insideRes] = await Promise.all([
         call('/me'), call('/purchase-orders'), call('/goods-receipts'), call('/stock/balances'),
-        call('/journal'), call('/packs'), call('/packs/navigation'), call('/gate/inside'),
+        call('/stock/ledger'), call('/journal'), call('/packs'), call('/gate/inside'),
       ])
-      setInside(insideRes as InsideVehicle[])
       setMe(meRes as Me); setPos(poRes as PO[]); setGrns(grnRes as GRN[])
-      setStock(stockRes as Stock); setJournal(jRes as Journal[])
-      setPacks(packRes as Pack[]); setPackNav(navRes as NavEntry[]); setError('')
+      setStock(stockRes as Stock); setLedger(ledgerRes as LedgerRow[]); setJournal(jRes as Journal[])
+      setPacks(packRes as Pack[]); setInside(insideRes as InsideVehicle[]); setError('')
 
-      // Pack data is fetched only when the pack is on. A disabled pack would
-      // return PACK_NOT_INSTALLED, and one failing request must not blank the page.
+      // Pack data only for packs reporting INSTALLED: a disabled pack answers
+      // PACK_NOT_INSTALLED, and one failing request must not blank the page.
       const live = (packRes as Pack[]).filter((p) => p.state === 'INSTALLED').map((p) => p.id)
       if (live.includes('carton')) {
         const [t, b] = await Promise.all([call('/carton/tooling'), call('/carton/board-specs')])
         setTools(t as Tool[]); setBoards(b as BoardSpec[])
       } else { setTools([]); setBoards([]); setTrim(null) }
       if (live.includes('textile')) {
-        const [d, f] = await Promise.all([call('/textile/dye-lots'), call('/textile/fabric-specs')])
-        setDyeLots(d as DyeLot[]); setFabrics(f as FabricSpec[])
-      } else { setDyeLots([]); setFabrics([]) }
+        const [f, d] = await Promise.all([call('/textile/fabric-specs'), call('/textile/dye-lots')])
+        setFabrics(f as FabricSpec[]); setDyeLots(d as DyeLot[])
+      } else { setFabrics([]); setDyeLots([]) }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
   }, [token, call])
 
   useEffect(() => { void load() }, [load])
-
-  function signOut() {
-    try {
-      sessionStorage.removeItem('prodx.token')
-      sessionStorage.removeItem('prodx.refresh')
-    } catch { /* ignore */ }
-    setToken(null); setMe(null)
-  }
-
-  /**
-   * Every gate call carries a device reference. A real scanner sends its own;
-   * the browser stands in for one here, and a fresh reference each click is
-   * what makes the retry behaviour visible rather than hidden.
-   */
-  const deviceRef = () => ({
-    deviceSource: 'WEB_GATE_TERMINAL',
-    deviceRef: `WEB-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  })
-
-  async function runTrim() {
-    // "780 x 1000" — width in millimetres, metres required.
-    const orders = trimOrders.split('\n').map((line, i) => {
-      const [w, m] = line.split(/[x×,]/).map((part) => Number(part.trim()))
-      return { id: `ORD-${i + 1}`, widthMm: w ?? 0, requiredMetres: m ?? 0 }
-    }).filter((o) => o.widthMm > 0 && o.requiredMetres > 0)
-
-    setBusy(true); setError(''); setNotice('')
-    try {
-      const result = await call('/carton/trim-plans/simulate', {
-        method: 'POST',
-        body: JSON.stringify({ deckleMm: Number(deckle), orders }),
-      })
-      setTrim(result as TrimResult)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally { setBusy(false) }
-  }
 
   async function act(fn: () => Promise<unknown>, message: string) {
     setBusy(true); setError(''); setNotice('')
@@ -225,507 +155,451 @@ export default function Page() {
     finally { setBusy(false) }
   }
 
+  const deviceRef = () => ({
+    deviceSource: 'WEB_GATE_TERMINAL',
+    deviceRef: `WEB-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  })
+
+  async function runTrim() {
+    const orders = trimOrders.split('\n').map((line, i) => {
+      const [w, m] = line.split(/[x×,]/).map((p) => Number(p.trim()))
+      return { id: `ORD-${i + 1}`, widthMm: w ?? 0, requiredMetres: m ?? 0 }
+    }).filter((o) => o.widthMm > 0 && o.requiredMetres > 0)
+    setBusy(true); setError(''); setNotice('')
+    try {
+      setTrim((await call('/carton/trim-plans/simulate', {
+        method: 'POST', body: JSON.stringify({ deckleMm: Number(deckle), orders }),
+      })) as TrimResult)
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+
   if (token === null) {
     return (
-      <Login
-        onToken={(pair) => {
-          try {
-            sessionStorage.setItem('prodx.token', pair.accessToken)
-            sessionStorage.setItem('prodx.refresh', pair.refreshToken)
-          } catch { /* private mode */ }
-          setToken(pair.accessToken)
-        }}
-      />
+      <Login onToken={(pair) => {
+        try {
+          sessionStorage.setItem('prodx.token', pair.accessToken)
+          sessionStorage.setItem('prodx.refresh', pair.refreshToken)
+        } catch { /* private mode */ }
+        setToken(pair.accessToken)
+      }} />
     )
   }
 
-  const posted = grns.filter((g) => g.state === 'POSTED').length
-  const stockValue = stock?.valuations.reduce((s, v) => s + Number(v.totalValue), 0) ?? 0
+  const perms = me?.permissions ?? []
+  const livePacks = packs.filter((p) => p.state === 'INSTALLED').map((p) => p.id)
+  const visible = (item: NavItem): boolean =>
+    holds(perms, item.permission) && (item.pack === undefined || livePacks.includes(item.pack))
+
+  const go = (id: string) => { setView(id); setMenuOpen(false); setNotice(''); setError('') }
+  const current = NAV.flatMap((g) => g.items).find((i) => i.id === view)
 
   return (
     <div className="shell">
-      <aside className="side">
+      <button className="hamburger" onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu">☰</button>
+
+      <aside className={`side${menuOpen ? ' open' : ''}`}>
         <div className="brand">
           <span className="mark">P</span>
           <div><strong>PRODX</strong><small>Manufacturing ERP</small></div>
         </div>
+
         {me !== null && (
-          <>
-            <div className="who">
-              <b>{me.displayName}</b>
-              <small>{me.email}</small>
-              {me.isSuperAdmin && <span className="sa">Superadmin — all factories</span>}
-              <div className="perm">{me.permissions.map((p) => <span key={p}>{p}</span>)}</div>
+          <div className="who">
+            <b>{me.displayName}</b>
+            <small>{me.email}</small>
+            {me.isSuperAdmin && <span className="sa">Superadmin</span>}
+            <div className="scoperow">
+              {me.plants.map((p) => <span key={p.id} className="sc">{p.code}</span>)}
+              {me.departments.length > 0 && me.departments.length < 4 &&
+                me.departments.map((d) => <span key={d.id} className="sc dept">{d.code}</span>)}
             </div>
+          </div>
+        )}
 
-            <div className="scope">
-              <h3>Factories</h3>
-              {me.plants.map((p) => <div key={p.id} className="sitem"><b>{p.code}</b><small>{p.name}</small></div>)}
-              <h3 style={{ marginTop: 14 }}>Departments</h3>
-              <div className="dchips">
-                {me.departments.length === 0
-                  ? <small style={{ color: '#8aa4ad' }}>none</small>
-                  : [...new Set(me.departments.map((d) => d.code))].map((c) => <span key={c}>{c}</span>)}
-              </div>
-            </div>
-
-            {packNav.length > 0 && (
-              <div className="scope">
-                <h3>From installed packs</h3>
-                {[...new Set(packNav.map((n) => n.group))].map((group) => (
-                  <div key={group} style={{ marginBottom: 10 }}>
-                    <div className="ngroup">{group}</div>
-                    {packNav.filter((n) => n.group === group).map((n) => (
-                      <div key={n.path} className="nleaf">{n.label}</div>
-                    ))}
-                  </div>
+        <nav className="menu">
+          {NAV.map((group) => {
+            const items = group.items.filter(visible)
+            if (items.length === 0) return null
+            return (
+              <div key={group.group} className="mgroup">
+                <div className="mtitle">{group.group}</div>
+                {items.map((item) => (
+                  <button
+                    key={item.id}
+                    className={`mitem${view === item.id ? ' active' : ''}${item.planned !== undefined ? ' soon' : ''}`}
+                    onClick={() => go(item.id)}
+                  >
+                    {item.label}
+                    {item.planned !== undefined && <em>soon</em>}
+                  </button>
                 ))}
               </div>
-            )}
+            )
+          })}
+        </nav>
 
-            <nav className="nav">
-              {DOMAINS.map((d) => {
-                const visible = d.perm === undefined || me.permissions.some((p) => p === '*' || p === d.perm || p.endsWith(':*') && d.perm?.startsWith(p.slice(0, -1)))
-                return (
-                  <div key={d.name} className={`nrow${visible ? '' : ' dim'}`}>
-                    <span>{d.name}</span>
-                    <b>{d.live === undefined ? d.modules : `${d.live}/${d.modules}`}</b>
-                  </div>
-                )
-              })}
-            </nav>
-          </>
-        )}
-        <button className="btn" onClick={signOut} style={{ marginTop: 'auto' }}>Sign out</button>
+        <button className="btn signout" onClick={signOut}>Sign out</button>
       </aside>
 
+      {menuOpen && <div className="scrim" onClick={() => setMenuOpen(false)} />}
+
       <main className="main">
-        <h1>Procure to Receive</h1>
+        <h1>{current?.label ?? 'Overview'}</h1>
         <p className="sub">
-          Live data from PostgreSQL. You are seeing{' '}
-          <b>{me?.isSuperAdmin === true ? 'every factory' : me?.plants.map((p) => p.code).join(', ')}</b>
-          {' '}— enforced by row level security in the database, not by a filter in this page.
+          {me?.isSuperAdmin === true
+            ? 'Every factory'
+            : me?.plants.map((p) => p.code).join(', ') ?? ''}
+          {' · enforced by row level security in the database'}
         </p>
 
         {error !== '' && <div className="err">{error}</div>}
         {notice !== '' && <div className="ok">{notice}</div>}
 
-        <div className="kpis">
-          <div className="kpi"><small>Purchase orders</small><b>{pos.length}</b></div>
-          <div className="kpi"><small>Receipts posted</small><b>{posted}</b></div>
-          <div className="kpi"><small>Stock value</small><b style={{ fontSize: 19 }}>{money(String(stockValue))}</b></div>
-          <div className="kpi"><small>Journal entries</small><b>{journal.length}</b></div>
-        </div>
+        {current?.planned !== undefined ? (
+          <Planned item={current} />
+        ) : (
+          <>
+            {view === 'overview' && (
+              <>
+                <div className="kpis">
+                  <div className="kpi"><small>Purchase orders</small><b>{pos.length}</b></div>
+                  <div className="kpi"><small>Receipts posted</small><b>{grns.filter((g) => g.state === 'POSTED').length}</b></div>
+                  <div className="kpi"><small>Stock value</small><b style={{ fontSize: 19 }}>{money(stock?.valuations.reduce((s, v) => s + Number(v.totalValue), 0) ?? 0)}</b></div>
+                  <div className="kpi"><small>Vehicles inside</small><b>{inside.length}</b></div>
+                </div>
+                <Panel title="Where to start" sub="Every menu item on the left opens; the ones marked “soon” say what they will hold.">
+                  <ul className="steps">
+                    <li><b>Purchase Orders</b> — submit a draft, then try approving it yourself. The backend refuses: whoever submits cannot approve.</li>
+                    <li><b>Gate Control</b> — record an entry, weigh it, then try gate out before posting the receipt.</li>
+                    <li><b>Corrugator Trim Plan</b> — type widths and metres, run the optimiser.</li>
+                    <li><b>Industry Packs</b> — install textile, and its menu group appears.</li>
+                  </ul>
+                </Panel>
+              </>
+            )}
 
-        <section className="panel">
-          <div className="phead"><div><h2>Purchase orders</h2><small>
-            Draft → submit → approve → release → receive. Whoever submits cannot approve —
-            try it as the same user and the backend refuses.
-          </small></div></div>
-          {pos.length === 0 ? <div className="empty">No purchase orders.</div> : (
-            <table>
-              <thead><tr><th>Document</th><th>Supplier</th><th>Item</th><th className="num">Ordered</th><th className="num">Received</th><th className="num">Amount</th><th>State</th><th></th></tr></thead>
-              <tbody>
-                {pos.map((po) => po.lines.map((line, i) => (
-                  <tr key={line.id}>
-                    {i === 0 && <td rowSpan={po.lines.length} className="code">{po.documentNo ?? <span style={{ color: 'var(--muted)', fontWeight: 400 }}>unnumbered</span>}</td>}
-                    {i === 0 && <td rowSpan={po.lines.length}>{po.supplier.name}</td>}
-                    <td><b>{line.item.code}</b><br /><small style={{ color: 'var(--muted)' }}>{line.item.name}</small></td>
-                    <td className="num">{qty(line.quantity)}</td>
-                    <td className="num">{qty(line.receivedQuantity)}</td>
-                    <td className="num">{money(line.amount)}</td>
-                    {i === 0 && <td rowSpan={po.lines.length}><span className={`chip ${po.state}`}>{po.state}</span></td>}
-                    {i === 0 && (
-                      <td rowSpan={po.lines.length}>
-                        <div className="pactions">
-                          {/* Driven by the order's own state, not by a fixed button list —
-                              the backend workflow is the authority and refuses anything else. */}
-                          {po.state === 'DRAFT' && (
-                            <button className="btn primary" disabled={busy}
-                              onClick={() => act(() => call(`/purchase-orders/${po.id}/submit`, { method: 'POST' }),
-                                'Submitted for approval. The submitter cannot approve it.')}>
-                              Submit
-                            </button>
-                          )}
-                          {po.state === 'PENDING_APPROVAL' && (
-                            <>
-                              <button className="btn primary" disabled={busy}
-                                onClick={() => act(() => call(`/purchase-orders/${po.id}/approve`, { method: 'POST', body: '{}' }),
-                                  'Approved.')}>
-                                Approve
-                              </button>
-                              <button className="btn" disabled={busy}
-                                onClick={() => act(() => call(`/purchase-orders/${po.id}/reject`, { method: 'POST' }),
-                                  'Rejected — back to draft. Earlier signatures no longer count.')}>
-                                Reject
-                              </button>
-                            </>
-                          )}
-                          {po.state === 'APPROVED' && (
-                            <button className="btn primary" disabled={busy}
-                              onClick={() => act(() => call(`/purchase-orders/${po.id}/release`, { method: 'POST' }),
-                                'Released — the order now has its number.')}>
-                              Release
-                            </button>
-                          )}
-                          {po.state === 'RELEASED' && (
-                            <button className="btn primary" disabled={busy}
-                              onClick={() => act(() => call(`/purchase-orders/${po.id}/receive`, { method: 'POST', body: '{}' }), 'Draft receipt created.')}>
-                              Receive
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                )))}
-              </tbody>
-            </table>
-          )}
-        </section>
+            {view === 'purchase-orders' && (
+              <Panel title="Purchase orders" sub="Draft → submit → approve → release → receive. Whoever submits cannot approve.">
+                {pos.length === 0 ? <Empty>Nothing visible in your scope.</Empty> : (
+                  <Table head={['Document', 'Supplier', 'Plant', 'Lines', 'Value', 'State', '']}>
+                    {pos.map((po) => (
+                      <tr key={po.id}>
+                        <td className="code">{po.documentNo ?? <span className="muted">unnumbered</span>}</td>
+                        <td>{po.supplier.name}</td>
+                        <td>{po.plant.code}</td>
+                        <td>{po.lines.map((l) => (
+                          <div key={l.id}><small><b>{l.item.code}</b> {qty(l.quantity)} @ {l.rate} · received {qty(l.receivedQuantity)}</small></div>
+                        ))}</td>
+                        <td className="num">{money(po.totalAmount)}</td>
+                        <td><span className={`chip ${po.state}`}>{po.state.replace(/_/g, ' ')}</span></td>
+                        <td>
+                          <div className="pactions">
+                            {po.state === 'DRAFT' && <Act busy={busy} label="Submit" primary onClick={() => act(() => call(`/purchase-orders/${po.id}/submit`, { method: 'POST' }), 'Submitted. You cannot approve your own submission.')} />}
+                            {po.state === 'PENDING_APPROVAL' && <>
+                              <Act busy={busy} label="Approve" primary onClick={() => act(() => call(`/purchase-orders/${po.id}/approve`, { method: 'POST', body: '{}' }), 'Approved.')} />
+                              <Act busy={busy} label="Reject" onClick={() => act(() => call(`/purchase-orders/${po.id}/reject`, { method: 'POST' }), 'Rejected. Earlier signatures no longer count.')} />
+                            </>}
+                            {po.state === 'APPROVED' && <Act busy={busy} label="Release" primary onClick={() => act(() => call(`/purchase-orders/${po.id}/release`, { method: 'POST' }), 'Released with its document number.')} />}
+                            {po.state === 'RELEASED' && <Act busy={busy} label="Receive" primary onClick={() => act(() => call(`/purchase-orders/${po.id}/receive`, { method: 'POST', body: '{}' }), 'Draft receipt created.')} />}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </Table>
+                )}
+              </Panel>
+            )}
 
-        <section className="panel">
-          <div className="phead"><div><h2>Goods receipts</h2><small>Posting moves stock, revalues the item and writes the journal — in one transaction</small></div></div>
-          {grns.length === 0 ? <div className="empty">No receipts yet. Use Receive above.</div> : (
-            <table>
-              <thead><tr><th>Document</th><th>Against</th><th>Posting date</th><th className="num">Lines</th><th className="num">Value</th><th>State</th><th></th></tr></thead>
-              <tbody>
-                {grns.map((g) => (
-                  <tr key={g.id}>
-                    <td className="code">{g.documentNo ?? '—'}</td>
-                    <td>{g.purchaseOrder.documentNo}</td>
-                    <td>{g.postingDate.slice(0, 10)}</td>
-                    <td className="num">{g.lines.length}</td>
-                    <td className="num">{money(String(g.lines.reduce((s, l) => s + Number(l.amount), 0)))}</td>
-                    <td><span className={`chip ${g.state}`}>{g.state}</span></td>
-                    <td>
-                      {g.state === 'DRAFT' && (
-                        <button className="btn primary" disabled={busy}
-                          onClick={() => act(() => call(`/goods-receipts/${g.id}/post`, { method: 'POST' }), 'Receipt posted.')}>Post</button>
-                      )}
-                      {g.state === 'POSTED' && (
-                        <button className="btn" disabled={busy}
-                          onClick={() => act(() => call(`/goods-receipts/${g.id}/reverse`, { method: 'POST' }), 'Receipt reversed — balances restored.')}>Reverse</button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
+            {view === 'goods-receipts' && (
+              <Panel title="Goods receipts" sub="Posting moves stock, revalues the item and writes the journal — in one transaction.">
+                {grns.length === 0 ? <Empty>No receipts. Use Receive on a released order.</Empty> : (
+                  <Table head={['Document', 'Against', 'Date', 'Lines', 'Value', 'State', '']}>
+                    {grns.map((g) => (
+                      <tr key={g.id}>
+                        <td className="code">{g.documentNo ?? <span className="muted">unnumbered</span>}</td>
+                        <td>{g.purchaseOrder.documentNo ?? '—'}</td>
+                        <td>{g.postingDate.slice(0, 10)}</td>
+                        <td>{g.lines.map((l) => (
+                          <div key={l.id}><small>{l.item.code} · {qty(l.quantity)}{l.secondaryQuantity !== null && <> · <b>{qty(l.secondaryQuantity)} kg measured</b></>}</small></div>
+                        ))}</td>
+                        <td className="num">{money(g.lines.reduce((s, l) => s + Number(l.amount), 0))}</td>
+                        <td><span className={`chip ${g.state}`}>{g.state}</span></td>
+                        <td>
+                          <div className="pactions">
+                            {g.state === 'DRAFT' && <Act busy={busy} label="Post" primary onClick={() => act(() => call(`/goods-receipts/${g.id}/post`, { method: 'POST' }), 'Posted.')} />}
+                            {g.state === 'POSTED' && <Act busy={busy} label="Reverse" onClick={() => act(() => call(`/goods-receipts/${g.id}/reverse`, { method: 'POST' }), 'Reversed — balances restored exactly.')} />}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </Table>
+                )}
+              </Panel>
+            )}
 
-        <section className="panel">
-          <div className="phead"><div><h2>Stock &amp; valuation</h2><small>Moving weighted average, maintained in the same transaction as the ledger</small></div></div>
-          {(stock?.valuations.length ?? 0) === 0 ? <div className="empty">No stock yet. Post a receipt.</div> : (
-            <table>
-              <thead><tr><th>Item</th><th className="num">On hand</th><th className="num">Unit cost</th><th className="num">Total value</th></tr></thead>
-              <tbody>
-                {stock?.valuations.map((v) => (
-                  <tr key={v.id}>
-                    <td><b>{v.item.code}</b><br /><small style={{ color: 'var(--muted)' }}>{v.item.name}</small></td>
-                    <td className="num">{qty(v.quantityOnHand)}</td>
-                    <td className="num">{money(v.unitCost)}</td>
-                    <td className="num">{money(v.totalValue)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
+            {view === 'stock' && (
+              <Panel title="Stock & valuation" sub="Moving weighted average, maintained in the same transaction as the ledger.">
+                {(stock?.valuations.length ?? 0) === 0 ? <Empty>No stock yet. Post a receipt.</Empty> : (
+                  <Table head={['Item', 'On hand', 'Unit cost', 'Total value']} numFrom={1}>
+                    {stock?.valuations.map((v) => (
+                      <tr key={v.id}>
+                        <td><b>{v.item.code}</b><br /><small className="muted">{v.item.name}</small></td>
+                        <td className="num">{qty(v.quantityOnHand)}</td>
+                        <td className="num">{money(v.unitCost)}</td>
+                        <td className="num">{money(v.totalValue)}</td>
+                      </tr>
+                    ))}
+                  </Table>
+                )}
+              </Panel>
+            )}
 
-        <section className="panel">
-          <div className="phead">
-            <div>
-              <h2>Gate &amp; weighbridge</h2>
-              <small>
-                Every call carries the device&apos;s own reference and is idempotent on it —
-                a scanner double-tap or a weighbridge resend cannot create a second event
-              </small>
-            </div>
-          </div>
+            {view === 'ledger' && (
+              <Panel title="Stock ledger" sub="Append-only. Balances are a projection of this, never the other way round.">
+                {ledger.length === 0 ? <Empty>No movements yet.</Empty> : (
+                  <Table head={['Date', 'Item', 'Direction', 'Quantity', 'Unit cost', 'Value', 'Source']}>
+                    {ledger.map((l) => (
+                      <tr key={l.id}>
+                        <td>{l.postingDate.slice(0, 10)}</td>
+                        <td><b>{l.item.code}</b></td>
+                        <td><span className={`chip ${l.direction === 'IN' ? 'POSTED' : 'DRAFT'}`}>{l.direction}</span></td>
+                        <td className="num">{qty(l.quantity)}</td>
+                        <td className="num">{money(l.unitCost)}</td>
+                        <td className="num">{money(l.totalValue)}</td>
+                        <td><small className="muted">{l.sourceType}</small></td>
+                      </tr>
+                    ))}
+                  </Table>
+                )}
+              </Panel>
+            )}
 
-          <div className="gatebar">
-            <label htmlFor="veh">Vehicle
-              <input id="veh" value={gateVehicle} onChange={(e) => setGateVehicle(e.target.value)} />
-            </label>
-            <label htmlFor="drv">Driver
-              <input id="drv" value={gateDriver} onChange={(e) => setGateDriver(e.target.value)} />
-            </label>
-            <button className="btn primary" disabled={busy}
-              onClick={() => act(() => call('/gate/in', {
-                method: 'POST',
-                body: JSON.stringify({
-                  ...deviceRef(), vehicleNo: gateVehicle, driverName: gateDriver,
-                  plantId: pos[0]?.plantId ?? '', purchaseOrderId: pos[0]?.id,
-                }),
-              }), `${gateVehicle} recorded at the gate.`)}>
-              Gate in
-            </button>
-          </div>
+            {view === 'journal' && (
+              <Panel title="Journal" sub="Append-only. A correction is a reversal, never an edit.">
+                {journal.length === 0 ? <Empty>Nothing posted yet.</Empty> : (
+                  <Table head={['Document', 'Account', 'Debit', 'Credit', 'Source']}>
+                    {journal.flatMap((j) => j.lines.map((l, i) => (
+                      <tr key={l.id}>
+                        {i === 0 ? <td rowSpan={j.lines.length} className="code">{j.documentNo}</td> : null}
+                        <td>{l.glAccount.code}<br /><small className="muted">{l.glAccount.name}</small></td>
+                        <td className="num">{Number(l.debit) === 0 ? '—' : money(l.debit)}</td>
+                        <td className="num">{Number(l.credit) === 0 ? '—' : money(l.credit)}</td>
+                        {i === 0 ? <td rowSpan={j.lines.length}><small className="muted">{j.sourceType}</small></td> : null}
+                      </tr>
+                    )))}
+                  </Table>
+                )}
+              </Panel>
+            )}
 
-          {inside.length === 0 ? (
-            <div className="empty">No vehicles inside. Record a gate entry above.</div>
-          ) : (
-            <div className="tscroll"><table>
-              <thead><tr>
-                <th>Vehicle</th><th>Against</th><th className="num">Inside</th>
-                <th>Weighments</th><th></th>
-              </tr></thead>
-              <tbody>
-                {inside.map((v) => (
-                  <tr key={v.gateEventId}>
-                    <td><b className="code">{v.vehicleNo}</b>{v.driverName !== null && <><br /><small style={{ color: 'var(--muted)' }}>{v.driverName}</small></>}</td>
-                    <td>{v.purchaseOrder ?? <small style={{ color: 'var(--muted)' }}>no order</small>}</td>
-                    <td className="num">
-                      <span style={{ color: v.minutesInside > 120 ? 'var(--red)' : 'inherit' }}>
-                        {v.minutesInside} min
-                      </span>
-                    </td>
-                    <td>
-                      {v.weighments.length === 0
-                        ? <small style={{ color: 'var(--muted)' }}>not weighed</small>
-                        : v.weighments.map((w, i) => (
-                            <div key={i}><small>gross {w.gross.toLocaleString('en-IN')} · tare {w.tare.toLocaleString('en-IN')} · <b>net {w.net.toLocaleString('en-IN')} kg</b></small></div>
-                          ))}
-                    </td>
-                    <td>
-                      <div className="pactions">
-                        <button className="btn" disabled={busy}
-                          onClick={() => act(() => call('/gate/weigh', {
-                            method: 'POST',
-                            body: JSON.stringify({
-                              ...deviceRef(), gateEventId: v.gateEventId,
-                              grossWeight: 18500, tareWeight: 7200,
-                            }),
-                          }), 'Weighment recorded — net 11,300 kg.')}>
-                          Weigh
-                        </button>
-                        <button className="btn" disabled={busy}
-                          onClick={() => act(() => call('/gate/out', {
-                            method: 'POST',
-                            body: JSON.stringify({
-                              ...deviceRef(), vehicleNo: v.vehicleNo, plantId: pos[0]?.plantId ?? '',
-                            }),
-                          }), `${v.vehicleNo} cleared the gate.`)}>
-                          Gate out
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table></div>
-          )}
-        </section>
+            {view === 'gate' && (
+              <Panel title="Gate control" sub="Every call carries the device's own reference and is idempotent on it — a double-tap cannot create a second event.">
+                <div className="gatebar">
+                  <label htmlFor="veh">Vehicle<input id="veh" value={gateVehicle} onChange={(e) => setGateVehicle(e.target.value)} /></label>
+                  <label htmlFor="drv">Driver<input id="drv" value={gateDriver} onChange={(e) => setGateDriver(e.target.value)} /></label>
+                  <Act busy={busy} label="Gate in" primary onClick={() => act(() => call('/gate/in', {
+                    method: 'POST',
+                    body: JSON.stringify({ ...deviceRef(), vehicleNo: gateVehicle, driverName: gateDriver, plantId: pos[0]?.plantId ?? '', purchaseOrderId: pos.find((p) => p.state === 'RELEASED')?.id }),
+                  }), `${gateVehicle} recorded at the gate.`)} />
+                </div>
+                {inside.length === 0 ? <Empty>No vehicles inside.</Empty> : (
+                  <Table head={['Vehicle', 'Against', 'Inside', 'Weighments', '']}>
+                    {inside.map((v) => (
+                      <tr key={v.gateEventId}>
+                        <td><b className="code">{v.vehicleNo}</b>{v.driverName !== null && <><br /><small className="muted">{v.driverName}</small></>}</td>
+                        <td>{v.purchaseOrder ?? <small className="muted">no order</small>}</td>
+                        <td className="num" style={{ color: v.minutesInside > 120 ? 'var(--red)' : 'inherit' }}>{v.minutesInside} min</td>
+                        <td>{v.weighments.length === 0 ? <small className="muted">not weighed</small> : v.weighments.map((w, i) => (
+                          <div key={i}><small>gross {qty(w.gross)} · tare {qty(w.tare)} · <b>net {qty(w.net)} kg</b></small></div>
+                        ))}</td>
+                        <td><div className="pactions">
+                          <Act busy={busy} label="Weigh" onClick={() => act(() => call('/gate/weigh', {
+                            method: 'POST', body: JSON.stringify({ ...deviceRef(), gateEventId: v.gateEventId, grossWeight: 31200, tareWeight: 7200 }),
+                          }), 'Weighed — net 24,000 kg.')} />
+                          <Act busy={busy} label="Gate out" onClick={() => act(() => call('/gate/out', {
+                            method: 'POST', body: JSON.stringify({ ...deviceRef(), vehicleNo: v.vehicleNo, plantId: pos[0]?.plantId ?? '' }),
+                          }), `${v.vehicleNo} cleared.`)} />
+                        </div></td>
+                      </tr>
+                    ))}
+                  </Table>
+                )}
+              </Panel>
+            )}
 
-        {tools.length + boards.length > 0 && (
-          <section className="panel">
-            <div className="phead">
-              <div>
-                <h2>Corrugated carton</h2>
-                <small>From the carton pack — these tables and screens disappear if it is disabled</small>
-              </div>
-            </div>
-            <div className="tscroll"><table>
-              <thead><tr><th>Board</th><th className="num">GSM</th><th className="num">BF</th><th className="num">Deckle</th></tr></thead>
-              <tbody>
-                {boards.map((b) => (
-                  <tr key={b.id}>
-                    <td><b>{b.item.code}</b><br /><small style={{ color: 'var(--muted)' }}>{b.item.name}</small></td>
-                    <td className="num">{b.gsm}</td>
-                    <td className="num">{b.burstFactor ?? '—'}</td>
-                    <td className="num">{b.deckleMm} mm</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table></div>
-            <div className="tscroll"><table>
-              <thead><tr><th>Tool</th><th>Type</th><th className="num">Impressions</th><th className="num">Life used</th></tr></thead>
-              <tbody>
-                {tools.map((t) => (
-                  <tr key={t.id}>
-                    <td><b>{t.code}</b><br /><small style={{ color: 'var(--muted)' }}>{t.name}</small></td>
-                    <td>{t.toolType.replace(/_/g, ' ').toLowerCase()}{t.customerOwned && <><br /><small>customer owned</small></>}</td>
-                    <td className="num">{t.currentImpressions.toLocaleString('en-IN')}{t.lifeLimit !== null && <> / {t.lifeLimit.toLocaleString('en-IN')}</>}</td>
-                    <td className="num">
-                      {t.lifeUsedPct === null ? '—' : (
-                        <span style={{ color: t.lifeUsedPct > 80 ? 'var(--red)' : 'inherit', fontWeight: t.lifeUsedPct > 80 ? 700 : 400 }}>
-                          {t.lifeUsedPct}%
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table></div>
+            {view === 'carton-board' && (
+              <Panel title="Board / paper specification" sub="From the carton pack. Disable the pack and this screen disappears.">
+                {boards.length === 0 ? <Empty>No board specifications.</Empty> : (
+                  <Table head={['Board', 'GSM', 'BF', 'Deckle']} numFrom={1}>
+                    {boards.map((b) => (
+                      <tr key={b.id}>
+                        <td><b>{b.item.code}</b><br /><small className="muted">{b.item.name}</small></td>
+                        <td className="num">{b.gsm}</td>
+                        <td className="num">{b.burstFactor ?? '—'}</td>
+                        <td className="num">{b.deckleMm} mm</td>
+                      </tr>
+                    ))}
+                  </Table>
+                )}
+              </Panel>
+            )}
 
-            <div className="trim">
-              <h3>Corrugator trim planner</h3>
-              <p>
-                Combining orders across the deck is where the money is. One line per order:
-                <code> width × metres</code>.
-              </p>
-              <div className="trimform">
-                <label htmlFor="deckle">Deckle (mm)
-                  <input id="deckle" value={deckle} onChange={(e) => setDeckle(e.target.value)} />
-                </label>
-                <label htmlFor="orders">Orders
-                  <textarea id="orders" rows={4} value={trimOrders} onChange={(e) => setTrimOrders(e.target.value)} />
-                </label>
-                <button className="btn primary" disabled={busy} onClick={() => void runTrim()}>
-                  {busy ? 'Planning…' : 'Run optimiser'}
-                </button>
-              </div>
-              {trim !== null && (
-                <div className="trimout">
-                  <div className="kpis" style={{ marginBottom: 12 }}>
-                    <div className="kpi"><small>Weighted trim</small><b>{trim.averageTrimPct}%</b></div>
-                    <div className="kpi"><small>Set-ups</small><b>{trim.patterns.length}</b></div>
-                    <div className="kpi"><small>Metres planned</small><b>{trim.totalMetres.toLocaleString('en-IN')}</b></div>
-                  </div>
-                  <table>
-                    <thead><tr><th>Lay-up</th><th className="num">Used</th><th className="num">Trim</th><th className="num">Run</th></tr></thead>
-                    <tbody>
+            {view === 'carton-tooling' && (
+              <Panel title="Die / plate / tooling" sub="A die that runs past its life makes scrap before anyone notices; the counter is the only warning.">
+                {tools.length === 0 ? <Empty>No tooling.</Empty> : (
+                  <Table head={['Tool', 'Type', 'Impressions', 'Life used']}>
+                    {tools.map((t) => (
+                      <tr key={t.id}>
+                        <td><b>{t.code}</b><br /><small className="muted">{t.name}</small></td>
+                        <td>{t.toolType.replace(/_/g, ' ').toLowerCase()}{t.customerOwned && <><br /><small>customer owned</small></>}</td>
+                        <td className="num">{qty(t.currentImpressions)}{t.lifeLimit !== null && <> / {qty(t.lifeLimit)}</>}</td>
+                        <td className="num" style={{ color: (t.lifeUsedPct ?? 0) > 80 ? 'var(--red)' : 'inherit', fontWeight: (t.lifeUsedPct ?? 0) > 80 ? 700 : 400 }}>
+                          {t.lifeUsedPct === null ? '—' : `${t.lifeUsedPct}%`}
+                        </td>
+                      </tr>
+                    ))}
+                  </Table>
+                )}
+              </Panel>
+            )}
+
+            {view === 'carton-trim' && (
+              <Panel title="Corrugator trim plan" sub="Combining orders across the deck is where the money is. One line per order: width × metres.">
+                <div className="trimform">
+                  <label htmlFor="deckle">Deckle (mm)<input id="deckle" value={deckle} onChange={(e) => setDeckle(e.target.value)} /></label>
+                  <label htmlFor="orders">Orders<textarea id="orders" rows={4} value={trimOrders} onChange={(e) => setTrimOrders(e.target.value)} /></label>
+                  <Act busy={busy} label={busy ? 'Planning…' : 'Run optimiser'} primary onClick={() => void runTrim()} />
+                </div>
+                {trim !== null && (
+                  <>
+                    <div className="kpis">
+                      <div className="kpi"><small>Weighted trim</small><b>{trim.averageTrimPct}%</b></div>
+                      <div className="kpi"><small>Set-ups</small><b>{trim.patterns.length}</b></div>
+                      <div className="kpi"><small>Metres planned</small><b>{qty(trim.totalMetres)}</b></div>
+                    </div>
+                    <Table head={['Lay-up', 'Used', 'Trim', 'Run']} numFrom={1}>
                       {trim.patterns.map((p, i) => (
                         <tr key={i}>
                           <td>{p.combination.map((c) => `${c.orderId} ×${c.ups}`).join('  +  ')}</td>
                           <td className="num">{p.usedMm} mm</td>
                           <td className="num">{p.trimMm} mm ({p.trimPct}%)</td>
-                          <td className="num">{p.runMetres.toLocaleString('en-IN')} m</td>
+                          <td className="num">{qty(p.runMetres)} m</td>
                         </tr>
                       ))}
-                    </tbody>
-                  </table>
-                  {trim.unfulfilled.length > 0 && (
-                    <div className="warn">
-                      Not coverable within the trim limit:{' '}
-                      {trim.unfulfilled.map((u) => `${u.orderId} (${u.remainingMetres} m)`).join(', ')}.
-                      The planner says so rather than reporting a plan that leaves them short.
-                    </div>
-                  )}
+                    </Table>
+                    {trim.unfulfilled.length > 0 && (
+                      <div className="warn">
+                        Not coverable within the trim limit: {trim.unfulfilled.map((u) => `${u.orderId} (${u.remainingMetres} m)`).join(', ')}.
+                        The planner says so rather than reporting a plan that leaves them short.
+                      </div>
+                    )}
+                  </>
+                )}
+              </Panel>
+            )}
+
+            {view === 'textile-fabric' && (
+              <Panel title="Fabric specification" sub="From the textile pack.">
+                {fabrics.length === 0 ? <Empty>No fabric specifications yet.</Empty> : (
+                  <Table head={['Fabric', 'GSM', 'Width', 'Construction']} numFrom={1}>
+                    {fabrics.map((f) => (
+                      <tr key={f.id}>
+                        <td><b>{f.item.code}</b><br /><small className="muted">{f.item.name}</small></td>
+                        <td className="num">{f.gsm}</td>
+                        <td className="num">{f.widthInch}&quot;</td>
+                        <td>{f.construction ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </Table>
+                )}
+              </Panel>
+            )}
+
+            {view === 'textile-dyelots' && (
+              <Panel title="Dyeing batch & shade band" sub="A garment cut across shade bands shows a mismatched panel. Allocation has to respect the band.">
+                {dyeLots.length === 0 ? <Empty>No dye lots yet.</Empty> : (
+                  <Table head={['Dye lot', 'Colour', 'Shade band', 'Lab dip']}>
+                    {dyeLots.map((d) => (
+                      <tr key={d.id}>
+                        <td className="code">{d.documentNo}</td>
+                        <td>{d.colourCode}</td>
+                        <td><span className="band">{d.shadeBand}</span></td>
+                        <td>{d.labDipRef ?? <span style={{ color: 'var(--red)' }}>not approved</span>}</td>
+                      </tr>
+                    ))}
+                  </Table>
+                )}
+              </Panel>
+            )}
+
+            {view === 'packs' && (
+              <Panel title="Industry packs" sub="The core ERP is industry-neutral. A pack's data is hidden by the database itself when the pack is off.">
+                <div className="packs">
+                  {packs.map((p) => (
+                    <article key={p.id} className={`pack ${p.state}`}>
+                      <header>
+                        <div><b>{p.name}</b><small>v{p.version} · {p.moduleCount} modules · {p.permissionCount} permissions</small></div>
+                        <span className={`chip ${p.state}`}>{p.state.replace(/_/g, ' ')}</span>
+                      </header>
+                      <p>{p.description}</p>
+                      <footer>
+                        <small>{p.rowCount === 0 ? 'No records yet' : `${p.rowCount} record${p.rowCount === 1 ? '' : 's'} — uninstall refused, disable instead`}</small>
+                        <div className="pactions">
+                          {p.state !== 'INSTALLED' && <Act busy={busy} primary label={p.state === 'DISABLED' ? 'Re-enable' : 'Install'} onClick={() => act(() => call(`/packs/${p.id}/install`, { method: 'POST' }), `${p.name} installed. Sign out and back in to pick up its permissions.`)} />}
+                          {p.state === 'INSTALLED' && <Act busy={busy} label="Disable" onClick={() => act(() => call(`/packs/${p.id}/disable`, { method: 'POST' }), `${p.name} disabled. Its data is kept and hidden.`)} />}
+                          {p.state !== 'NOT_INSTALLED' && <Act busy={busy} label="Uninstall" onClick={() => act(() => call(`/packs/${p.id}`, { method: 'DELETE' }), `${p.name} uninstalled.`)} />}
+                        </div>
+                      </footer>
+                    </article>
+                  ))}
                 </div>
-              )}
-            </div>
-          </section>
+              </Panel>
+            )}
+          </>
         )}
-
-        {dyeLots.length + fabrics.length > 0 && (
-          <section className="panel">
-            <div className="phead">
-              <div>
-                <h2>Textile &amp; garment</h2>
-                <small>From the textile pack — shade band is what allocation has to respect</small>
-              </div>
-            </div>
-            <div className="tscroll"><table>
-              <thead><tr><th>Fabric</th><th className="num">GSM</th><th className="num">Width</th><th>Construction</th></tr></thead>
-              <tbody>
-                {fabrics.map((f) => (
-                  <tr key={f.id}>
-                    <td><b>{f.item.code}</b><br /><small style={{ color: 'var(--muted)' }}>{f.item.name}</small></td>
-                    <td className="num">{f.gsm}</td>
-                    <td className="num">{f.widthInch}"</td>
-                    <td>{f.construction ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table></div>
-            <div className="tscroll"><table>
-              <thead><tr><th>Dye lot</th><th>Colour</th><th>Shade band</th><th>Lab dip</th></tr></thead>
-              <tbody>
-                {dyeLots.map((d) => (
-                  <tr key={d.id}>
-                    <td className="code">{d.documentNo}</td>
-                    <td>{d.colourCode}</td>
-                    <td><span className="band">{d.shadeBand}</span></td>
-                    <td>{d.labDipRef ?? <span style={{ color: 'var(--red)' }}>not approved</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table></div>
-          </section>
-        )}
-
-        <section className="panel">
-          <div className="phead">
-            <div>
-              <h2>Industry packs</h2>
-              <small>
-                The core ERP is industry-neutral. A pack adds its own screens, permissions and
-                tables — and its data is hidden by the database itself when the pack is off.
-              </small>
-            </div>
-          </div>
-          {packs.length === 0 ? <div className="empty">No packs in this build.</div> : (
-            <div className="packs">
-              {packs.map((p) => (
-                <article key={p.id} className={`pack ${p.state}`}>
-                  <header>
-                    <div>
-                      <b>{p.name}</b>
-                      <small>v{p.version} · {p.moduleCount} modules · {p.permissionCount} permissions</small>
-                    </div>
-                    <span className={`chip ${p.state}`}>{p.state.replace('_', ' ')}</span>
-                  </header>
-                  <p>{p.description}</p>
-                  <footer>
-                    <small>
-                      {p.rowCount === 0
-                        ? 'No records yet'
-                        : `${p.rowCount} record${p.rowCount === 1 ? '' : 's'} — uninstall is refused, disable instead`}
-                    </small>
-                    <div className="pactions">
-                      {p.state !== 'INSTALLED' && (
-                        <button className="btn primary" disabled={busy}
-                          onClick={() => act(() => call(`/packs/${p.id}/install`, { method: 'POST' }),
-                            `${p.name} installed. Sign out and back in to pick up its permissions.`)}>
-                          {p.state === 'DISABLED' ? 'Re-enable' : 'Install'}
-                        </button>
-                      )}
-                      {p.state === 'INSTALLED' && (
-                        <button className="btn" disabled={busy}
-                          onClick={() => act(() => call(`/packs/${p.id}/disable`, { method: 'POST' }),
-                            `${p.name} disabled. Its data is kept and hidden.`)}>
-                          Disable
-                        </button>
-                      )}
-                      {p.state !== 'NOT_INSTALLED' && (
-                        <button className="btn" disabled={busy}
-                          onClick={() => act(() => call(`/packs/${p.id}`, { method: 'DELETE' }),
-                            `${p.name} uninstalled.`)}>
-                          Uninstall
-                        </button>
-                      )}
-                    </div>
-                  </footer>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="panel">
-          <div className="phead"><div><h2>Journal</h2><small>Append-only. A correction is a reversal, never an edit.</small></div></div>
-          {journal.length === 0 ? <div className="empty">Nothing posted yet.</div> : (
-            <table>
-              <thead><tr><th>Document</th><th>Account</th><th className="num">Debit</th><th className="num">Credit</th><th>Source</th></tr></thead>
-              <tbody>
-                {journal.map((j) => j.lines.map((l, i) => (
-                  <tr key={l.id}>
-                    {i === 0 && <td rowSpan={j.lines.length} className="code">{j.documentNo}</td>}
-                    <td>{l.glAccount.code}<br /><small style={{ color: 'var(--muted)' }}>{l.glAccount.name}</small></td>
-                    <td className="num">{Number(l.debit) === 0 ? '—' : money(l.debit)}</td>
-                    <td className="num">{Number(l.credit) === 0 ? '—' : money(l.credit)}</td>
-                    {i === 0 && <td rowSpan={j.lines.length}><small>{j.sourceType}</small></td>}
-                  </tr>
-                )))}
-              </tbody>
-            </table>
-          )}
-        </section>
       </main>
     </div>
+  )
+}
+
+function Panel({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
+  return (
+    <section className="panel">
+      <div className="phead"><div><h2>{title}</h2>{sub !== undefined && <small>{sub}</small>}</div></div>
+      {children}
+    </section>
+  )
+}
+
+function Table({ head, children, numFrom }: { head: string[]; children: React.ReactNode; numFrom?: number }) {
+  return (
+    <div className="tscroll"><table>
+      <thead><tr>{head.map((h, i) => <th key={h + String(i)} className={numFrom !== undefined && i >= numFrom ? 'num' : ''}>{h}</th>)}</tr></thead>
+      <tbody>{children}</tbody>
+    </table></div>
+  )
+}
+
+const Empty = ({ children }: { children: React.ReactNode }) => <div className="empty">{children}</div>
+
+function Act({ label, onClick, primary, busy }: { label: string; onClick: () => void; primary?: boolean; busy: boolean }) {
+  return <button className={`btn${primary === true ? ' primary' : ''}`} disabled={busy} onClick={onClick}>{label}</button>
+}
+
+/** An honest placeholder. A menu item that does nothing is worse than one that says so. */
+function Planned({ item }: { item: NavItem }) {
+  return (
+    <section className="panel planned">
+      <h2>{item.label}</h2>
+      <p className="tag">Not built yet</p>
+      <p>{item.planned}</p>
+      <p className="muted">
+        The engines this screen needs — documents, workflow, approvals, posting, audit — are
+        built and tested. What is missing is this screen and its endpoints, not the machinery
+        underneath.
+      </p>
+    </section>
   )
 }
 
@@ -735,8 +609,6 @@ const DEMO_USERS = [
   { email: 'textile.head@prodx.demo', label: 'Textile Plant Head', detail: 'Textile Plant only' },
   { email: 'carton.stores@prodx.demo', label: 'Store Executive', detail: 'Carton Plant · Stores' },
 ] as const
-
-interface TokenPair { accessToken: string; refreshToken: string }
 
 function Login({ onToken }: { onToken: (pair: TokenPair) => void }) {
   const [tenantCode, setTenantCode] = useState('DEMO')
@@ -749,16 +621,14 @@ function Login({ onToken }: { onToken: (pair: TokenPair) => void }) {
     setBusy(true); setError('')
     try {
       const res = await fetch(`${API}/auth/login`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ tenantCode, email: withEmail, password }),
       })
       const body: unknown = await res.json().catch(() => null)
       if (!res.ok) throw new Error((body as { message?: string } | null)?.message ?? 'Sign in failed')
       onToken(body as TokenPair)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally { setBusy(false) }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
   }
 
   return (
@@ -770,7 +640,6 @@ function Login({ onToken }: { onToken: (pair: TokenPair) => void }) {
         </div>
         <h1>Sign in</h1>
         {error !== '' && <div className="err" style={{ marginTop: 14 }}>{error}</div>}
-
         <label htmlFor="tenant">Tenant code</label>
         <input id="tenant" value={tenantCode} onChange={(e) => setTenantCode(e.target.value)} />
         <label htmlFor="email">Email</label>
@@ -780,7 +649,6 @@ function Login({ onToken }: { onToken: (pair: TokenPair) => void }) {
         <button className="btn primary" style={{ width: '100%', marginTop: 18, padding: 10 }} disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
-
         <div className="hint">
           <b style={{ color: 'var(--ink)' }}>Demo users</b> — one click each. The two plant heads
           hold the same role and see different data.
@@ -788,8 +656,7 @@ function Login({ onToken }: { onToken: (pair: TokenPair) => void }) {
             {DEMO_USERS.map((u) => (
               <button key={u.email} type="button" className="user" disabled={busy}
                 onClick={() => { setEmail(u.email); void signIn(u.email) }}>
-                <b>{u.label}</b>
-                <small>{u.detail}</small>
+                <b>{u.label}</b><small>{u.detail}</small>
               </button>
             ))}
           </div>
