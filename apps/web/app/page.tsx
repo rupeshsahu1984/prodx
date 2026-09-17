@@ -29,6 +29,22 @@ interface Weighment { gross: number; tare: number; net: number }
 interface InsideVehicle { gateEventId: string; vehicleNo: string; driverName: string | null; plant: string; purchaseOrder: string | null; minutesInside: number; weighments: Weighment[] }
 interface TrimPattern { combination: { orderId: string; ups: number }[]; usedMm: number; trimMm: number; trimPct: number; runMetres: number }
 interface TrimResult { deckleMm: number; patterns: TrimPattern[]; averageTrimPct: number; totalMetres: number; unfulfilled: { orderId: string; remainingMetres: number }[] }
+interface Uom { id: string; code: string; name: string; dimension: string }
+interface Item { id: string; code: string; name: string; isDualUom: boolean; granularity: string; isActive: boolean; baseUom: { code: string }; secondaryUom: { code: string } | null }
+interface Party { id: string; code: string; name: string; type: string; taxRegistrationNo: string | null; isActive: boolean }
+interface Role { id: string; code: string; name: string; permissions: string[]; _count: { users: number } }
+interface UserRow {
+  id: string; email: string; displayName: string; isSuperAdmin: boolean; isActive: boolean
+  lockedUntil: string | null
+  roles: { role: { id: string; code: string; name: string } }[]
+  plantAccess: { plant: { id: string; code: string } }[]
+  deptAccess: { department: { id: string; code: string } }[]
+}
+interface Dept { id: string; code: string; name: string }
+interface OrgPlant { id: string; code: string; name: string; legalEntity: { code: string }; departments: Dept[]; warehouses: { id: string; code: string; name: string; locations: { id: string; code: string }[] }[] }
+interface Org { legalEntities: { id: string; code: string; name: string }[]; plants: OrgPlant[] }
+interface Series { id: string; seriesCode: string; fiscalYear: string; format: string; nextValue: number; legalEntity: { code: string } }
+interface Rule { id: string; documentType: string; minAmount: string; maxAmount: string | null; permission: string; sequence: number; plant: { code: string } | null }
 interface TokenPair { accessToken: string; refreshToken: string }
 
 const money = (v: string | number) => `₹ ${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
@@ -59,6 +75,15 @@ export default function Page() {
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [uoms, setUoms] = useState<Uom[]>([])
+  const [items, setItems] = useState<Item[]>([])
+  const [parties, setParties] = useState<Party[]>([])
+  const [roles, setRoles] = useState<Role[]>([])
+  const [users, setUsers] = useState<UserRow[]>([])
+  const [org, setOrg] = useState<Org | null>(null)
+  const [series, setSeries] = useState<Series[]>([])
+  const [rules, setRules] = useState<Rule[]>([])
+  const [form, setForm] = useState<Record<string, string>>({})
   // Only the group you are in stays open. With 151 modules, everything expanded
   // is a wall of text nobody reads.
   const [openGroups, setOpenGroups] = useState<string[]>(['Home & Control Tower'])
@@ -151,6 +176,52 @@ export default function Page() {
   }, [token, call])
 
   useEffect(() => { void load() }, [load])
+
+  /**
+   * Master data is fetched only for the screen being viewed.
+   * Loading all of it on every render would pull eight lists nobody is looking
+   * at, on a tenant that may have thousands of items.
+   */
+  const loadMaster = useCallback(async () => {
+    if (token === null || !view.startsWith('master-')) return
+    try {
+      if (view === 'master-items') {
+        const [u, i] = await Promise.all([call('/master-data/uoms'), call('/master-data/items')])
+        setUoms(u as Uom[]); setItems(i as Item[])
+      }
+      if (view === 'master-parties') setParties((await call('/master-data/parties')) as Party[])
+      if (view === 'master-org') setOrg((await call('/master-data/org')) as Org)
+      if (view === 'master-users') {
+        const [r, u, o] = await Promise.all([
+          call('/master-data/roles'), call('/master-data/users'), call('/master-data/org'),
+        ])
+        setRoles(r as Role[]); setUsers(u as UserRow[]); setOrg(o as Org)
+      }
+      if (view === 'master-numbering') {
+        const [n, o] = await Promise.all([call('/master-data/number-series'), call('/master-data/org')])
+        setSeries(n as Series[]); setOrg(o as Org)
+      }
+      if (view === 'master-approvals') setRules((await call('/master-data/approval-rules')) as Rule[])
+      setError('')
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+  }, [token, view, call])
+
+  useEffect(() => { void loadMaster() }, [loadMaster])
+
+  const field = (key: string) => ({
+    value: form[key] ?? '',
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setForm((f) => ({ ...f, [key]: e.target.value })),
+  })
+
+  async function create(path: string, body: unknown, message: string) {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      await call(path, { method: 'POST', body: JSON.stringify(body) })
+      setForm({}); setNotice(message); await loadMaster(); await load()
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
 
   async function act(fn: () => Promise<unknown>, message: string) {
     setBusy(true); setError(''); setNotice('')
@@ -577,6 +648,266 @@ export default function Page() {
                   </Table>
                 )}
               </Panel>
+            )}
+
+            {view === 'master-items' && (
+              <>
+                <Panel title="New item" sub="Dual-UoM items carry a second, measured quantity — metres alongside kilograms.">
+                  <div className="form">
+                    <label>Code<input {...field('code')} placeholder="RM-KRAFT-200" /></label>
+                    <label>Name<input {...field('name')} placeholder="Kraft Liner 200 GSM" /></label>
+                    <label>Base unit
+                      <select {...field('baseUomId')}>
+                        <option value="">choose…</option>
+                        {uoms.map((u) => <option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}
+                      </select>
+                    </label>
+                    <label>Second unit (optional)
+                      <select {...field('secondaryUomId')}>
+                        <option value="">none</option>
+                        {uoms.map((u) => <option key={u.id} value={u.id}>{u.code}</option>)}
+                      </select>
+                    </label>
+                    <label>Tracking
+                      <select {...field('granularity')}>
+                        <option value="LOT">Lot / batch</option>
+                        <option value="SERIAL">Serial (each roll)</option>
+                        <option value="BULK">Bulk</option>
+                      </select>
+                    </label>
+                    <Act busy={busy} primary label="Create item" onClick={() => create('/master-data/items', {
+                      code: form['code'], name: form['name'], baseUomId: form['baseUomId'],
+                      isDualUom: (form['secondaryUomId'] ?? '') !== '',
+                      secondaryUomId: form['secondaryUomId'] === '' ? null : form['secondaryUomId'],
+                      granularity: form['granularity'] ?? 'LOT',
+                    }, 'Item created.')} />
+                  </div>
+                </Panel>
+                <Panel title="Items" sub={`${items.length} in your scope`}>
+                  {items.length === 0 ? <Empty>No items.</Empty> : (
+                    <Table head={['Code', 'Name', 'Base unit', 'Second unit', 'Tracking', 'Active']}>
+                      {items.map((i) => (
+                        <tr key={i.id}>
+                          <td className="code">{i.code}</td><td>{i.name}</td>
+                          <td>{i.baseUom.code}</td>
+                          <td>{i.secondaryUom?.code ?? <span className="muted">—</span>}</td>
+                          <td><small>{i.granularity.toLowerCase()}</small></td>
+                          <td><span className={`chip ${i.isActive ? 'POSTED' : 'NOT_INSTALLED'}`}>{i.isActive ? 'active' : 'inactive'}</span></td>
+                        </tr>
+                      ))}
+                    </Table>
+                  )}
+                </Panel>
+              </>
+            )}
+
+            {view === 'master-parties' && (
+              <>
+                <Panel title="New customer or supplier">
+                  <div className="form">
+                    <label>Code<input {...field('code')} placeholder="SUP-002" /></label>
+                    <label>Name<input {...field('name')} placeholder="Shakti Yarns Pvt Ltd" /></label>
+                    <label>Type
+                      <select {...field('type')}>
+                        <option value="SUPPLIER">Supplier</option>
+                        <option value="CUSTOMER">Customer</option>
+                        <option value="BOTH">Both</option>
+                      </select>
+                    </label>
+                    <label>GSTIN<input {...field('gstin')} placeholder="27AAAAA0000A1Z5" /></label>
+                    <Act busy={busy} primary label="Create" onClick={() => create('/master-data/parties', {
+                      code: form['code'], name: form['name'], type: form['type'] ?? 'SUPPLIER',
+                      taxRegistrationNo: form['gstin'] === '' ? null : form['gstin'],
+                    }, 'Party created.')} />
+                  </div>
+                </Panel>
+                <Panel title="Customers & suppliers">
+                  {parties.length === 0 ? <Empty>None yet.</Empty> : (
+                    <Table head={['Code', 'Name', 'Type', 'GSTIN', 'Active']}>
+                      {parties.map((p) => (
+                        <tr key={p.id}>
+                          <td className="code">{p.code}</td><td>{p.name}</td>
+                          <td><small>{p.type.toLowerCase()}</small></td>
+                          <td><small className="muted">{p.taxRegistrationNo ?? '—'}</small></td>
+                          <td><span className={`chip ${p.isActive ? 'POSTED' : 'NOT_INSTALLED'}`}>{p.isActive ? 'active' : 'inactive'}</span></td>
+                        </tr>
+                      ))}
+                    </Table>
+                  )}
+                </Panel>
+              </>
+            )}
+
+            {view === 'master-org' && org !== null && (
+              <>
+                <Panel title="New plant" sub="A plant is created with its main store and first bay — a plant with no warehouse cannot receive anything.">
+                  <div className="form">
+                    <label>Code<input {...field('code')} placeholder="CARTON-02" /></label>
+                    <label>Name<input {...field('name')} placeholder="Carton Plant, Vapi" /></label>
+                    <label>Legal entity
+                      <select {...field('legalEntityId')}>
+                        <option value="">choose…</option>
+                        {org.legalEntities.map((l) => <option key={l.id} value={l.id}>{l.code} — {l.name}</option>)}
+                      </select>
+                    </label>
+                    <Act busy={busy} primary label="Create plant" onClick={() => create('/master-data/plants', {
+                      code: form['code'], name: form['name'], legalEntityId: form['legalEntityId'],
+                    }, 'Plant created with its main store.')} />
+                  </div>
+                </Panel>
+                {org.plants.map((p) => (
+                  <Panel key={p.id} title={`${p.code} — ${p.name}`} sub={`Legal entity ${p.legalEntity.code}`}>
+                    <div className="orgrow">
+                      <div>
+                        <h4>Departments</h4>
+                        <div className="chips">{p.departments.map((d) => <span key={d.id} className="band">{d.code}</span>)}</div>
+                        <div className="inline">
+                          <input placeholder="New department code" {...field(`dept-${p.id}`)} />
+                          <Act busy={busy} label="Add" onClick={() => create('/master-data/departments', {
+                            code: form[`dept-${p.id}`], name: form[`dept-${p.id}`], plantId: p.id,
+                          }, 'Department added.')} />
+                        </div>
+                      </div>
+                      <div>
+                        <h4>Warehouses</h4>
+                        {p.warehouses.map((w) => (
+                          <div key={w.id}><b>{w.code}</b> <small className="muted">{w.locations.map((l) => l.code).join(', ')}</small></div>
+                        ))}
+                      </div>
+                    </div>
+                  </Panel>
+                ))}
+              </>
+            )}
+
+            {view === 'master-users' && (
+              <>
+                <Panel title="New user" sub="Roles decide which actions; plants and departments decide which data. They are separate on purpose.">
+                  <div className="form">
+                    <label>Email<input {...field('email')} placeholder="name@company.com" /></label>
+                    <label>Name<input {...field('displayName')} placeholder="A. Shah" /></label>
+                    <label>Password<input type="password" {...field('password')} placeholder="at least 12 characters" /></label>
+                    <label>Role
+                      <select {...field('roleId')}>
+                        <option value="">choose…</option>
+                        {roles.map((r) => <option key={r.id} value={r.id}>{r.code} — {r.name}</option>)}
+                      </select>
+                    </label>
+                    <label>Plant
+                      <select {...field('plantId')}>
+                        <option value="">all (superadmin only)</option>
+                        {org?.plants.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
+                      </select>
+                    </label>
+                    <Act busy={busy} primary label="Create user" onClick={() => create('/master-data/users', {
+                      email: form['email'], displayName: form['displayName'], password: form['password'],
+                      isSuperAdmin: false,
+                      roleIds: (form['roleId'] ?? '') === '' ? [] : [form['roleId']],
+                      plantIds: (form['plantId'] ?? '') === '' ? [] : [form['plantId']],
+                      departmentIds: [],
+                    }, 'User created.')} />
+                  </div>
+                </Panel>
+                <Panel title="Users">
+                  {users.length === 0 ? <Empty>None.</Empty> : (
+                    <Table head={['User', 'Roles', 'Factories', 'Departments', 'Status']}>
+                      {users.map((u) => (
+                        <tr key={u.id}>
+                          <td><b>{u.displayName}</b><br /><small className="muted">{u.email}</small></td>
+                          <td>{u.isSuperAdmin ? <span className="chip APPROVED">superadmin</span> : u.roles.map((r) => <div key={r.role.id}><small>{r.role.name}</small></div>)}</td>
+                          <td>{u.isSuperAdmin ? <small className="muted">all</small> : <div className="chips">{u.plantAccess.map((a) => <span key={a.plant.id} className="band">{a.plant.code}</span>)}</div>}</td>
+                          <td>{u.deptAccess.length === 0 ? <small className="muted">all of their plants</small> : <div className="chips">{u.deptAccess.map((a) => <span key={a.department.id} className="band">{a.department.code}</span>)}</div>}</td>
+                          <td>
+                            <span className={`chip ${u.isActive ? 'POSTED' : 'NOT_INSTALLED'}`}>{u.isActive ? 'active' : 'inactive'}</span>
+                            {u.lockedUntil !== null && <><br /><small style={{ color: 'var(--red)' }}>locked</small></>}
+                          </td>
+                        </tr>
+                      ))}
+                    </Table>
+                  )}
+                </Panel>
+                <Panel title="Roles">
+                  <Table head={['Code', 'Name', 'Permissions', 'Users']}>
+                    {roles.map((r) => (
+                      <tr key={r.id}>
+                        <td className="code">{r.code}</td><td>{r.name}</td>
+                        <td><div className="chips">{r.permissions.map((p) => <span key={p} className="perm">{p}</span>)}</div></td>
+                        <td className="num">{r._count.users}</td>
+                      </tr>
+                    ))}
+                  </Table>
+                </Panel>
+              </>
+            )}
+
+            {view === 'master-numbering' && (
+              <>
+                <Panel title="New number series" sub="Gapless per legal entity and fiscal year. Placeholders: {FY} and a run of # for the number.">
+                  <div className="form">
+                    <label>Legal entity
+                      <select {...field('legalEntityId')}>
+                        <option value="">choose…</option>
+                        {org?.legalEntities.map((l) => <option key={l.id} value={l.id}>{l.code}</option>)}
+                      </select>
+                    </label>
+                    <label>Document type<input {...field('seriesCode')} placeholder="SALES_INVOICE" /></label>
+                    <label>Fiscal year<input {...field('fiscalYear')} placeholder="2026-27" /></label>
+                    <label>Format<input {...field('format')} placeholder="INV/{FY}/{####}" /></label>
+                    <Act busy={busy} primary label="Create series" onClick={() => create('/master-data/number-series', {
+                      legalEntityId: form['legalEntityId'], seriesCode: form['seriesCode'],
+                      fiscalYear: form['fiscalYear'], format: form['format'], nextValue: 1,
+                    }, 'Series created.')} />
+                  </div>
+                </Panel>
+                <Panel title="Number series">
+                  {series.length === 0 ? <Empty>None configured.</Empty> : (
+                    <Table head={['Document type', 'Entity', 'Fiscal year', 'Format', 'Next']} numFrom={4}>
+                      {series.map((n) => (
+                        <tr key={n.id}>
+                          <td className="code">{n.seriesCode}</td><td>{n.legalEntity.code}</td>
+                          <td>{n.fiscalYear}</td><td><code>{n.format}</code></td>
+                          <td className="num">{n.nextValue}</td>
+                        </tr>
+                      ))}
+                    </Table>
+                  )}
+                </Panel>
+              </>
+            )}
+
+            {view === 'master-approvals' && (
+              <>
+                <Panel title="New approval rule" sub="Bands are [from, to) so they cannot overlap. A gap blocks the document rather than auto-approving it.">
+                  <div className="form">
+                    <label>Document type<input {...field('documentType')} placeholder="PURCHASE_ORDER" /></label>
+                    <label>From (₹)<input {...field('minAmount')} placeholder="0" /></label>
+                    <label>To (₹, blank = no limit)<input {...field('maxAmount')} placeholder="100000" /></label>
+                    <label>Permission needed<input {...field('permission')} placeholder="purchase_order:approve" /></label>
+                    <label>Step<input {...field('sequence')} placeholder="1" /></label>
+                    <Act busy={busy} primary label="Create rule" onClick={() => create('/master-data/approval-rules', {
+                      documentType: form['documentType'], minAmount: Number(form['minAmount'] ?? 0),
+                      maxAmount: (form['maxAmount'] ?? '') === '' ? null : Number(form['maxAmount']),
+                      permission: form['permission'], sequence: Number(form['sequence'] ?? 1),
+                    }, 'Approval rule created.')} />
+                  </div>
+                </Panel>
+                <Panel title="Approval matrix">
+                  {rules.length === 0 ? <Empty>No rules. Documents cannot be submitted until a band covers their value.</Empty> : (
+                    <Table head={['Document type', 'From', 'To', 'Step', 'Permission', 'Plant']}>
+                      {rules.map((r) => (
+                        <tr key={r.id}>
+                          <td className="code">{r.documentType}</td>
+                          <td className="num">{money(r.minAmount)}</td>
+                          <td className="num">{r.maxAmount === null ? <span className="muted">no limit</span> : money(r.maxAmount)}</td>
+                          <td className="num">{r.sequence}</td>
+                          <td><span className="perm">{r.permission}</span></td>
+                          <td>{r.plant?.code ?? <span className="muted">all</span>}</td>
+                        </tr>
+                      ))}
+                    </Table>
+                  )}
+                </Panel>
+              </>
             )}
 
             {view === 'packs' && (

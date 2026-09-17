@@ -38,14 +38,14 @@ export const NAV: NavGroup[] = [
   {
     group: 'Enterprise & Master Data',
     items: [
-      { id: 'planned:company-plant-structure', label: 'Company / Plant Structure', planned: 'Legal entity, plant, warehouse, line, work center, shift and cost center.' },
-      { id: 'planned:users-roles-sod', label: 'Users, Roles & SoD', planned: 'Role-based access, plant scope, maker-checker and conflict control.' },
-      { id: 'planned:item-material-master', label: 'Item & Material Master', planned: 'Raw material, WIP, finished goods, services, attributes and UoM.' },
-      { id: 'planned:customer-supplier-master', label: 'Customer & Supplier Master', planned: 'Commercial, tax, quality, logistics, credit and contact data.' },
-      { id: 'planned:bom-recipe-routing', label: 'BOM / Recipe / Routing', planned: 'Versioned material structures, operations, resources, yield and effectivity.' },
-      { id: 'planned:document-numbering-setup', label: 'Document & Numbering Setup', planned: 'Document types, sequences, templates, attachments and retention.' },
-      { id: 'planned:calendar-shift-capacity', label: 'Calendar, Shift & Capacity', planned: 'Working calendars, shifts, holidays, breaks and capacity rules.' },
-      { id: 'planned:workflow-approval-setup', label: 'Workflow & Approval Setup', planned: 'Threshold, condition, escalation, delegation and reapproval rules.' },
+      { id: 'master-org', label: 'Company / Plant Structure', permission: 'master_data:read' },
+      { id: 'master-users', label: 'Users, Roles & SoD', permission: 'master_data:read' },
+      { id: 'master-items', label: 'Item & Material Master', permission: 'master_data:read' },
+      { id: 'master-parties', label: 'Customer & Supplier Master', permission: 'master_data:read' },
+      { id: 'planned:bom-recipe-routing', label: 'BOM / Recipe / Routing', permission: 'master_data:read', planned: 'Versioned material structures, operations, resources, yield and effectivity.' },
+      { id: 'master-numbering', label: 'Document & Numbering Setup', permission: 'master_data:read' },
+      { id: 'planned:calendar-shift-capacity', label: 'Calendar, Shift & Capacity', permission: 'master_data:read', planned: 'Working calendars, shifts, holidays, breaks and capacity rules.' },
+      { id: 'master-approvals', label: 'Workflow & Approval Setup', permission: 'master_data:read' },
     ],
   },
   {

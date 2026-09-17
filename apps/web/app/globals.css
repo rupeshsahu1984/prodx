@@ -175,3 +175,19 @@ input:focus,textarea:focus{outline:2px solid var(--teal);outline-offset:-1px;bor
   .gatebar input{width:100%}
 }
 @media(prefers-reduced-motion:reduce){.side{transition:none}}
+
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;
+  align-items:end;padding:16px}
+.form label{font-size:12px;color:var(--muted);display:block;margin:0}
+.form input,.form select{margin-top:5px;width:100%}
+.form .btn{height:36px}
+select{padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13.5px;
+  font-family:inherit;background:#fff;color:var(--ink)}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.perm{display:inline-block;font-family:ui-monospace,monospace;font-size:10px;background:#eef4f5;
+  color:var(--navy);padding:2px 6px;border-radius:3px}
+.orgrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;padding:16px}
+.orgrow h4{margin:0 0 8px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.inline{display:flex;gap:7px;margin-top:10px}
+.inline input{flex:1;min-width:0}
+code{font-family:ui-monospace,monospace;font-size:12px;background:var(--bg);padding:1px 5px;border-radius:3px}

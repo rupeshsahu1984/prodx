@@ -94,7 +94,12 @@ async function main(): Promise<void> {
         { id: id.roleAdmin, tenantId, code: 'ADMIN', name: 'Administrator', permissions: ['*', 'pack:manage'] },
         {
           id: id.rolePlantHead, tenantId, code: 'PLANT_HEAD', name: 'Plant Head',
-          permissions: ['purchase_order:*', 'goods_receipt:*', 'stock:read', 'gate:*'],
+          permissions: [
+            'purchase_order:*', 'goods_receipt:*', 'stock:read', 'gate:*',
+            // Master data is separate from transactional rights on purpose: a
+            // plant head may maintain their own masters, a store executive may not.
+            'master_data:read', 'master_data:write',
+          ],
         },
         {
           id: id.roleStores, tenantId, code: 'STORE_EXECUTIVE', name: 'Store Executive',
@@ -103,6 +108,7 @@ async function main(): Promise<void> {
             'purchase_order:read', 'purchase_order:submit',
             'goods_receipt:read', 'goods_receipt:post', 'stock:read',
             'gate:read', 'gate:in', 'gate:weigh', 'gate:out',
+            'master_data:read',
           ],
         },
       ],

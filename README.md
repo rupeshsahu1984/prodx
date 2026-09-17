@@ -31,6 +31,17 @@ packs/textile      Textile & garment pack
 prototype/         The original prototype (spec)
 ```
 
+## The menu
+
+Generated from `prototype/data.js` — all 15 domains and 151 modules, nothing trimmed
+(`pnpm --filter @prodx/web nav:generate`). Nineteen have real screens; the rest open a panel
+saying what they will hold. A menu that lists only what exists leaves a user unable to tell
+"the product lacks this" from "the menu is broken".
+
+Groups collapse, and a search filters across all 151 — typing `payroll` finds Payroll
+Processing without knowing which domain owns it. Pack-owned domains appear only when the pack
+is installed.
+
 ## Industry packs
 
 The core ERP is industry-neutral. Corrugated carton and textile ship as **packs** that a tenant

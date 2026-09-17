@@ -22,6 +22,12 @@ const domains = globalThis.window.PRODX_DOMAINS
 /** Screens that exist, keyed by the prototype's module name. */
 const BUILT = {
   'Executive Dashboard': 'overview',
+  'Company / Plant Structure': 'master-org',
+  'Users, Roles & SoD': 'master-users',
+  'Item & Material Master': 'master-items',
+  'Customer & Supplier Master': 'master-parties',
+  'Document & Numbering Setup': 'master-numbering',
+  'Workflow & Approval Setup': 'master-approvals',
   'Purchase Order': 'purchase-orders',
   'Goods Receipt': 'goods-receipts',
   'Inventory Overview': 'stock',
@@ -44,6 +50,7 @@ const PACK_OF = {
 
 /** Permission a domain needs to appear. Undefined means any signed-in user. */
 const PERM_OF = {
+  'Enterprise & Master Data': 'master_data:read',
   'Procurement & Supplier': 'purchase_order:read',
   'Inventory, Warehouse & Logistics': 'stock:read',
   'Gate, Security & Weighbridge': 'gate:read',

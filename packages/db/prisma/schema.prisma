@@ -87,6 +87,7 @@ model Plant {
   goodsReceipts  GoodsReceipt[]
   departments    Department[]
   userAccess     UserPlantAccess[]
+  approvalRules  ApprovalRule[]
   cartonTools    CartonTool[]
   cartonTrimPlans CartonTrimPlan[]
   textileDyeLots TextileDyeLot[]
@@ -833,6 +834,9 @@ model ApprovalRule {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  /// A rule pointing at a plant that no longer exists is a silent
+  /// misconfiguration — documents stop matching and nobody knows why.
+  plant     Plant?           @relation(fields: [plantId], references: [id], onDelete: Restrict)
   approvals ApprovalRecord[]
 
   @@index([tenantId, documentType])
