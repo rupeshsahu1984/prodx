@@ -58,6 +58,10 @@ export default function Page() {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  // Only the group you are in stays open. With 151 modules, everything expanded
+  // is a wall of text nobody reads.
+  const [openGroups, setOpenGroups] = useState<string[]>(['Home & Control Tower'])
 
   useEffect(() => {
     try { setToken(sessionStorage.getItem('prodx.token')) } catch { /* private mode */ }
@@ -194,6 +198,24 @@ export default function Page() {
   const go = (id: string) => { setView(id); setMenuOpen(false); setNotice(''); setError('') }
   const current = NAV.flatMap((g) => g.items).find((i) => i.id === view)
 
+  const query = search.trim().toLowerCase()
+  const groups = NAV.map((g) => ({
+    group: g.group,
+    items: g.items.filter(
+      (i) =>
+        visible(i) &&
+        (query === '' ||
+          i.label.toLowerCase().includes(query) ||
+          g.group.toLowerCase().includes(query)),
+    ),
+    built: g.items.filter((i) => visible(i) && i.planned === undefined).length,
+  })).filter((g) => g.items.length > 0)
+
+  const toggle = (group: string) =>
+    setOpenGroups((open) =>
+      open.includes(group) ? open.filter((g) => g !== group) : [...open, group],
+    )
+
   return (
     <div className="shell">
       <button className="hamburger" onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu">☰</button>
@@ -217,20 +239,44 @@ export default function Page() {
           </div>
         )}
 
+        <label className="msearch" htmlFor="menusearch">
+          <input
+            id="menusearch"
+            value={search}
+            placeholder="Search 151 modules…"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search !== '' && (
+            <button type="button" onClick={() => setSearch('')} aria-label="Clear search">×</button>
+          )}
+        </label>
+
         <nav className="menu">
-          {NAV.map((group) => {
-            const items = group.items.filter(visible)
-            if (items.length === 0) return null
+          {groups.length === 0 && <p className="noresult">Nothing matches “{search}”.</p>}
+          {groups.map((group) => {
+            // A search opens everything it matched; otherwise the group you are in.
+            const expanded =
+              query !== '' ||
+              openGroups.includes(group.group) ||
+              group.items.some((i) => i.id === view)
             return (
               <div key={group.group} className="mgroup">
-                <div className="mtitle">{group.group}</div>
-                {items.map((item) => (
+                <button
+                  className={`mtitle${expanded ? ' open' : ''}`}
+                  onClick={() => toggle(group.group)}
+                  aria-expanded={expanded}
+                >
+                  <span className="caret">{expanded ? '⌄' : '›'}</span>
+                  <span className="gname">{group.group}</span>
+                  <span className="gcount">{group.built}/{group.items.length}</span>
+                </button>
+                {expanded && group.items.map((item) => (
                   <button
                     key={item.id}
                     className={`mitem${view === item.id ? ' active' : ''}${item.planned !== undefined ? ' soon' : ''}`}
                     onClick={() => go(item.id)}
                   >
-                    {item.label}
+                    <span>{item.label}</span>
                     {item.planned !== undefined && <em>soon</em>}
                   </button>
                 ))}
