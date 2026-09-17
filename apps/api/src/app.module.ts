@@ -12,9 +12,10 @@ import { MasterDataModule } from './master-data/master-data.module'
 import { PacksModule } from './packs/packs.module'
 import { PrismaService } from './prisma/prisma.service'
 import { PurchasingModule } from './purchasing/purchasing.module'
+import { SettingsModule } from './settings/settings.module'
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, OperationsModule, PacksModule, PackEndpointsModule, GateModule, PurchasingModule, MasterDataModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule, OperationsModule, PacksModule, PackEndpointsModule, GateModule, PurchasingModule, MasterDataModule, SettingsModule],
   controllers: [HealthController],
   providers: [PrismaService, { provide: APP_GUARD, useClass: PermissionsGuard }],
   exports: [PrismaService],

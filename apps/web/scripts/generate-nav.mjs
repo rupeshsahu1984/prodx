@@ -39,7 +39,8 @@ const BUILT = {
   'Corrugator Trim Plan': 'carton-trim',
   'Fabric Specification': 'textile-fabric',
   'Dyeing Batch & Recipe': 'textile-dyelots',
-  'Configuration & Feature Flags': 'packs',
+  'Configuration & Feature Flags': 'settings',
+  'Audit Trail': 'audit',
 }
 
 /** Domains owned by an industry pack, hidden until it is installed. */

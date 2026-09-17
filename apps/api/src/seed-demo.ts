@@ -91,7 +91,8 @@ async function main(): Promise<void> {
     // roles and see completely different data. That separation is the point.
     await tx.role.createMany({
       data: [
-        { id: id.roleAdmin, tenantId, code: 'ADMIN', name: 'Administrator', permissions: ['*', 'pack:manage'] },
+        { id: id.roleAdmin, tenantId, code: 'ADMIN', name: 'Administrator',
+          permissions: ['*', 'pack:manage', 'period:close', 'period:reopen'] },
         {
           id: id.rolePlantHead, tenantId, code: 'PLANT_HEAD', name: 'Plant Head',
           permissions: [
@@ -99,6 +100,10 @@ async function main(): Promise<void> {
             // Master data is separate from transactional rights on purpose: a
             // plant head may maintain their own masters, a store executive may not.
             'master_data:read', 'master_data:write',
+            // Closing a period is routine month-end work. Reopening one changes
+            // figures already reported, so it is a separate permission the
+            // administrator holds and the plant head does not.
+            'period:close',
           ],
         },
         {

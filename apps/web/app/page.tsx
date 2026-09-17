@@ -45,6 +45,16 @@ interface OrgPlant { id: string; code: string; name: string; legalEntity: { code
 interface Org { legalEntities: { id: string; code: string; name: string }[]; plants: OrgPlant[] }
 interface Series { id: string; seriesCode: string; fiscalYear: string; format: string; nextValue: number; legalEntity: { code: string } }
 interface Rule { id: string; documentType: string; minAmount: string; maxAmount: string | null; permission: string; sequence: number; plant: { code: string } | null }
+interface Period { id: string; sequence: number; startDate: string; endDate: string; status: 'OPEN' | 'SOFT_CLOSED' | 'CLOSED' }
+interface FiscalYear { id: string; code: string; legalEntity: { code: string }; periods: Period[] }
+interface Settings {
+  tenant: { code: string; name: string; isActive: boolean; createdAt: string }
+  legalEntities: { id: string; code: string; name: string; taxRegistrationNo: string | null; baseCurrency: string; _count: { plants: number } }[]
+  fiscalYears: FiscalYear[]
+  packs: { packId: string; version: string; status: string }[]
+  counts: { users: number; items: number; parties: number; plants: number }
+}
+interface AuditRow { id: string; entityType: string; entityId: string; action: string; source: string; createdAt: string; changes: Record<string, unknown> }
 interface TokenPair { accessToken: string; refreshToken: string }
 
 const money = (v: string | number) => `₹ ${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
@@ -84,6 +94,8 @@ export default function Page() {
   const [series, setSeries] = useState<Series[]>([])
   const [rules, setRules] = useState<Rule[]>([])
   const [form, setForm] = useState<Record<string, string>>({})
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [audit, setAudit] = useState<AuditRow[]>([])
   // Only the group you are in stays open. With 151 modules, everything expanded
   // is a wall of text nobody reads.
   const [openGroups, setOpenGroups] = useState<string[]>(['Home & Control Tower'])
@@ -183,7 +195,20 @@ export default function Page() {
    * at, on a tenant that may have thousands of items.
    */
   const loadMaster = useCallback(async () => {
-    if (token === null || !view.startsWith('master-')) return
+    if (token === null) return
+    if (view === 'settings') {
+      try {
+        const [s, p] = await Promise.all([call('/settings'), call('/packs')])
+        setSettings(s as Settings); setPacks(p as Pack[]); setError('')
+      } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+      return
+    }
+    if (view === 'audit') {
+      try { setAudit((await call('/settings/audit')) as AuditRow[]); setError('') }
+      catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+      return
+    }
+    if (!view.startsWith('master-')) return
     try {
       if (view === 'master-items') {
         const [u, i] = await Promise.all([call('/master-data/uoms'), call('/master-data/items')])
@@ -908,6 +933,96 @@ export default function Page() {
                   )}
                 </Panel>
               </>
+            )}
+
+            {view === 'settings' && settings !== null && (
+              <>
+                <div className="kpis">
+                  <div className="kpi"><small>Users</small><b>{settings.counts.users}</b></div>
+                  <div className="kpi"><small>Items</small><b>{settings.counts.items}</b></div>
+                  <div className="kpi"><small>Customers &amp; suppliers</small><b>{settings.counts.parties}</b></div>
+                  <div className="kpi"><small>Factories</small><b>{settings.counts.plants}</b></div>
+                </div>
+
+                <Panel title="Company" sub={`Tenant ${settings.tenant.code}`}>
+                  <Table head={['Legal entity', 'Name', 'GSTIN', 'Currency', 'Factories']} numFrom={4}>
+                    {settings.legalEntities.map((l) => (
+                      <tr key={l.id}>
+                        <td className="code">{l.code}</td><td>{l.name}</td>
+                        <td><small className="muted">{l.taxRegistrationNo ?? '—'}</small></td>
+                        <td>{l.baseCurrency}</td>
+                        <td className="num">{l._count.plants}</td>
+                      </tr>
+                    ))}
+                  </Table>
+                </Panel>
+
+                {settings.fiscalYears.map((fy) => (
+                  <Panel key={fy.id} title={`Fiscal calendar ${fy.code}`}
+                    sub="Nothing posts into a closed period. Closing is routine; reopening needs a separate permission and is recorded.">
+                    <Table head={['Period', 'From', 'To', 'Status', '']}>
+                      {fy.periods.map((p) => (
+                        <tr key={p.id}>
+                          <td className="num">{p.sequence}</td>
+                          <td>{p.startDate.slice(0, 10)}</td>
+                          <td>{p.endDate.slice(0, 10)}</td>
+                          <td><span className={`chip ${p.status === 'OPEN' ? 'POSTED' : p.status === 'CLOSED' ? 'REVERSED' : 'DRAFT'}`}>
+                            {p.status.replace('_', ' ').toLowerCase()}
+                          </span></td>
+                          <td><div className="pactions">
+                            {p.status === 'OPEN' && <Act busy={busy} label="Soft close" onClick={() => act(() => call(`/settings/periods/${p.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'SOFT_CLOSED' }) }), 'Period soft-closed — adjustments only.').then(loadMaster)} />}
+                            {p.status === 'SOFT_CLOSED' && <>
+                              <Act busy={busy} label="Close" onClick={() => act(() => call(`/settings/periods/${p.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'CLOSED' }) }), 'Period closed.').then(loadMaster)} />
+                              <Act busy={busy} label="Reopen" onClick={() => act(() => call(`/settings/periods/${p.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'OPEN' }) }), 'Period reopened.').then(loadMaster)} />
+                            </>}
+                            {p.status === 'CLOSED' && <Act busy={busy} label="Reopen" onClick={() => act(() => call(`/settings/periods/${p.id}/status`, { method: 'POST', body: JSON.stringify({ status: 'SOFT_CLOSED' }) }), 'Period reopened for adjustments.').then(loadMaster)} />}
+                          </div></td>
+                        </tr>
+                      ))}
+                    </Table>
+                  </Panel>
+                ))}
+
+                <Panel title="Industry packs" sub="The core ERP is industry-neutral. A pack's data is hidden by the database itself when it is off.">
+                  <div className="packs">
+                    {packs.map((p) => (
+                      <article key={p.id} className={`pack ${p.state}`}>
+                        <header>
+                          <div><b>{p.name}</b><small>v{p.version} · {p.moduleCount} modules · {p.permissionCount} permissions</small></div>
+                          <span className={`chip ${p.state}`}>{p.state.replace(/_/g, ' ')}</span>
+                        </header>
+                        <p>{p.description}</p>
+                        <footer>
+                          <small>{p.rowCount === 0 ? 'No records yet' : `${p.rowCount} record${p.rowCount === 1 ? '' : 's'} — uninstall refused, disable instead`}</small>
+                          <div className="pactions">
+                            {p.state !== 'INSTALLED' && <Act busy={busy} primary label={p.state === 'DISABLED' ? 'Re-enable' : 'Install'} onClick={() => act(() => call(`/packs/${p.id}/install`, { method: 'POST' }), `${p.name} installed. Sign out and back in to pick up its permissions.`)} />}
+                            {p.state === 'INSTALLED' && <Act busy={busy} label="Disable" onClick={() => act(() => call(`/packs/${p.id}/disable`, { method: 'POST' }), `${p.name} disabled. Its data is kept and hidden.`)} />}
+                            {p.state !== 'NOT_INSTALLED' && <Act busy={busy} label="Uninstall" onClick={() => act(() => call(`/packs/${p.id}`, { method: 'DELETE' }), `${p.name} uninstalled.`)} />}
+                          </div>
+                        </footer>
+                      </article>
+                    ))}
+                  </div>
+                </Panel>
+              </>
+            )}
+
+            {view === 'audit' && (
+              <Panel title="Audit trail" sub="Append-only: who changed what, when and from which source. Only the changed fields are kept — never the whole row.">
+                {audit.length === 0 ? <Empty>Nothing recorded yet. Close a period from Settings to see an entry.</Empty> : (
+                  <Table head={['When', 'Entity', 'Action', 'Change', 'Source']}>
+                    {audit.map((a) => (
+                      <tr key={a.id}>
+                        <td><small>{new Date(a.createdAt).toLocaleString('en-IN')}</small></td>
+                        <td><b>{a.entityType}</b><br /><small className="muted">{a.entityId.slice(0, 8)}…</small></td>
+                        <td><span className="chip DRAFT">{a.action.toLowerCase()}</span></td>
+                        <td><code>{JSON.stringify(a.changes)}</code></td>
+                        <td><small className="muted">{a.source}</small></td>
+                      </tr>
+                    ))}
+                  </Table>
+                )}
+              </Panel>
             )}
 
             {view === 'packs' && (
