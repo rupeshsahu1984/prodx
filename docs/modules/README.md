@@ -26,3 +26,4 @@ Scope for all 151 modules comes from `prototype/` (see `CLAUDE.md`).
 | # | Module | Domain | Status |
 |---|---|---|---|
 | 01 | [Configuration & Feature Flags](01-configuration.md) | Reports, AI & Administration | Built |
+| 02 | [Company / Plant Structure](02-company-plant-structure.md) | Enterprise & Master Data | Built (partly) |
