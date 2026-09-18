@@ -12,6 +12,9 @@ The clickable prototype in `prototype/` is the functional spec: **15 domains, 15
 `prototype/journeys.js` (cross-functional flows) before designing anything.
 
 Full architecture and gap analysis: `docs/architecture.md`.
+Per-module specifications: `docs/modules/` — one document per module, same shape each time.
+Write the module spec before the screen: the rules section is what someone needs when a
+customer asks why the system refused something.
 
 ## The single most important architectural rule
 
