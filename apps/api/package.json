@@ -5,11 +5,11 @@
   "scripts": {
     "build": "nest build",
     "dev": "nest start --watch",
-    "start": "node dist/main",
+    "start": "node --env-file=../../.env dist/main",
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
-    "seed:demo": "node dist/seed-demo.js",
-    "sync:packs": "node dist/sync-packs.js"
+    "seed:demo": "node --env-file=../../.env dist/seed-demo.js",
+    "sync:packs": "node --env-file=../../.env dist/sync-packs.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

@@ -2,7 +2,9 @@
   "name": "prodx-erp",
   "private": true,
   "packageManager": "pnpm@9.15.9",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
@@ -11,7 +13,15 @@
     "typecheck": "turbo run typecheck",
     "db:generate": "pnpm --filter @prodx/db generate",
     "db:migrate": "pnpm --filter @prodx/db migrate",
-    "db:studio": "pnpm --filter @prodx/db studio"
+    "db:studio": "pnpm --filter @prodx/db studio",
+    "setup": "pnpm install && pnpm build && pnpm db:setup && pnpm seed",
+    "db:setup": "TEST_DB_NAME=${DB_NAME:-prodx_dev} packages/db/scripts/setup-test-db.sh",
+    "db:test:setup": "packages/db/scripts/setup-test-db.sh",
+    "seed": "pnpm --filter @prodx/api seed:demo",
+    "dev:api": "pnpm --filter @prodx/api dev",
+    "dev:web": "pnpm --filter @prodx/web dev",
+    "dev:worker": "pnpm --filter @prodx/worker start",
+    "verify": "pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

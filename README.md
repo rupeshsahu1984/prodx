@@ -64,82 +64,53 @@ exercised from the Industry packs panel.
 
 ## Getting started
 
+Needs **Node 20+**, **pnpm 9** and **PostgreSQL 16**.
+
 ```bash
-pnpm install
-cp .env.example .env          # then replace every REPLACE_ME
-
-# Postgres 16+ and Redis 7+ are expected on the URLs in .env
-pnpm db:migrate               # creates the schema
-pnpm db:generate
-
-# Tenant isolation. Both are REQUIRED — see below.
-psql "$DATABASE_MIGRATION_URL" -v app_password="$PRODX_APP_PASSWORD" \
-     -f packages/db/scripts/create-app-role.sql
-psql "$DATABASE_MIGRATION_URL" -f packages/db/scripts/rls.sql
-
-pnpm --filter @prodx/worker build && pnpm --filter @prodx/worker start   # outbox delivery
-
-# demo tenant you can sign into
-pnpm --filter @prodx/api build && pnpm --filter @prodx/api seed:demo
-
-pnpm dev                      # api :3001, web :3000
+cp .env.example .env          # replace every REPLACE_ME
+pnpm setup                    # install, build, create the database, seed demo data
 ```
 
-Then open **http://localhost:3000** and sign in:
+`pnpm setup` runs migrations, creates the `prodx_app` and `prodx_worker` roles, applies row
+level security, syncs the pack catalogue and seeds a demo tenant. It **drops and recreates**
+the database each time, so it is for local development only.
 
-| | |
-|---|---|
-### Three scope dimensions, all enforced by RLS, all failing closed
+Then, in three terminals:
 
-| | Setting | Empty means |
-|---|---|---|
-| Tenant | `app.tenant_id` | nothing |
-| Factory | `app.plant_scope` | nothing |
-| Department | `app.departments` | nothing |
-| Industry pack | `app.packs` | nothing |
+```bash
+pnpm dev:api        # :3001
+pnpm dev:web        # :3000
+pnpm dev:worker     # outbox delivery
+```
 
-"No department assignments means every department" is resolved in the **auth layer**, which
-sends the explicit `*` for a plant head. The database never infers it from an empty setting —
-that would be a fail-open.
+Open **http://localhost:3000** and sign in:
 
 | Tenant code | `DEMO` |
+|---|---|
 | `admin@prodx.demo` | Superadmin — both factories |
 | `carton.head@prodx.demo` | Carton Plant only |
 | `textile.head@prodx.demo` | Textile Plant only |
 | `carton.stores@prodx.demo` | Carton Plant, Stores department, fewer rights |
 | Password | `prodx-demo-2026` |
 
-The two plant heads hold the **same role** and see completely different data. Permissions
-decide which actions a user may take; **scope** decides which data they may touch, and scope
-is enforced by row level security rather than by a filter any developer could forget.
+The two plant heads hold the **same role** and see completely different data. Permissions decide
+which actions a user may take; **scope** decides which data they may touch, and scope is enforced
+by row level security rather than by a filter any developer could forget.
 
 Each factory has one released order and one **draft awaiting approval**. Sign in as
 `carton.stores`, submit the draft, then try to approve it — the backend refuses, because the
-store executive can raise an order but not approve one. Sign in as `carton.head` and approve
-the same order; it then releases and gets its document number.
+store executive can raise an order but not approve one. Sign in as `carton.head` and approve the
+same order; it then releases and gets its document number.
 
-**Receive** on a released purchase order creates a draft for everything outstanding; **Post** moves
-stock, revalues the items and writes the journal in one transaction; **Reverse** puts all of
-it back. Sign in as the buyer to watch the same Reverse button return 403 from the backend.
-
-### Authentication and authorization
-
-The tenant is derived from a **signed JWT claim** — never a header, query parameter or body
-field, any of which a caller controls. `POST /auth/login` returns a 15-minute access token
-and a rotating refresh token; the refresh token is stored hashed and is revocable, and reuse
-of an already-rotated token revokes the whole family for that user, since reuse means it leaked.
-
-Authorization is a **globally applied guard that denies by default**. A route with no
-`@RequirePermission(...)` and no `@Public()` returns 403 rather than being open — a forgotten
-decorator becomes an obvious failure in development instead of a breach in production.
-
-Passwords use scrypt from Node's standard library (OWASP parameters, no native module), with
-account lockout after repeated failures.
+**Receive** on a released purchase order creates a draft for everything outstanding; **Post**
+moves stock, revalues the items and writes the journal in one transaction; **Reverse** puts all
+of it back. Sign in as the buyer to watch the same Reverse button return 403 from the backend.
 
 ### RLS is not optional
 
-`scripts/rls.sql` is what actually enforces tenant isolation (ADR 0002). Until it has run,
-every tenant can read every other tenant's data. It:
+`pnpm setup` applies it. If you set the database up by hand, `packages/db/scripts/rls.sql` is
+what actually enforces tenant isolation (ADR 0002). Until it has run, every tenant can read
+every other tenant's data. It:
 
 - asserts the non-owner `prodx_app` role exists (created by `create-app-role.sql`,
   which requires a password to be supplied rather than carrying one),
@@ -155,16 +126,12 @@ non-empty result should fail the build. A new table without a policy is a defect
 ## Verification
 
 ```bash
-# unit tests — no database needed
-pnpm --filter @prodx/core --filter @prodx/api test
-
-# integration tests — prove RLS, immutability and gapless numbering
-brew services start postgresql@16
-packages/db/scripts/setup-test-db.sh
-pnpm --filter @prodx/db test
-
-pnpm typecheck && pnpm build
+pnpm db:test:setup   # prepares prodx_test; integration tests need it
+pnpm verify          # typecheck + test + build, the gate before any commit
 ```
+
+The integration suite deliberately **fails** rather than skipping when no database is present:
+a security test that quietly does not run is worse than no test, because it reports success.
 
 Phase 0 status: **73 tests passing.** 53 unit tests (numbering, fiscal periods, valuation,
 passwords, permissions, JWT, auth middleware, permission guard) and 20 integration tests against a real PostgreSQL 16, which prove:
