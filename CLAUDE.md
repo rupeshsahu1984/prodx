@@ -57,10 +57,13 @@ stop and lift it into an engine.
    header, query parameter or body field.
 7. **Optimistic locking on every mutable business document** (`version` column). Two supervisors
    confirming the same work order must not double-issue stock.
-8. **Three scope dimensions, all enforced by RLS, all failing closed**: tenant
-   (`app.tenant_id`), factory (`app.plant_scope`) and industry pack (`app.packs`). They travel
-   together in one `DbScope` object, every field required, so a new dimension is a compile
-   error at every call site rather than a silent default.
+8. **Four scope dimensions, all enforced by RLS, all failing closed**: tenant
+   (`app.tenant_id`), factory (`app.plant_scope`), department (`app.departments`) and industry
+   pack (`app.packs`). They travel together in one `DbScope` object, every field required, so a
+   new dimension is a compile error at every call site rather than a silent default.
+   "No department assignments means every department" is resolved in the **auth layer**, which
+   sends the explicit `*`; the database never infers it from an empty setting, which would be a
+   fail-open.
 9. **A pack is installed per tenant, never per schema.** Every pack's tables exist in every
    deployment; installation is an activation row. Uninstall is refused while the pack holds
    data — the answer there is `disable`, which hides the screens and keeps the history.
@@ -74,7 +77,9 @@ apps/worker       BullMQ processors (own deployable, shared codebase)
 packages/db       Prisma schema, migrations, tenant client extension
 packages/contracts Zod schemas — the single API contract shared by api + web
 packages/core     Domain engines (framework-agnostic, heavily unit-tested)
-packages/ui       Design system ported from the prototype
+packages/pack-sdk What an industry pack implements, and the registry
+packs/carton      Corrugated carton pack
+packs/textile     Textile & garment pack
 prototype/        The original clickable HTML prototype (spec, do not edit)
 ```
 

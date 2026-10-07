@@ -27,3 +27,8 @@ Scope for all 151 modules comes from `prototype/` (see `CLAUDE.md`).
 |---|---|---|---|
 | 01 | [Configuration & Feature Flags](01-configuration.md) | Reports, AI & Administration | Built |
 | 02 | [Company / Plant Structure](02-company-plant-structure.md) | Enterprise & Master Data | Built (partly) |
+| 03 | [Users, Roles & SoD](03-users-roles-sod.md) | Enterprise & Master Data | Built (partly) |
+| 04 | [Item & Material Master](04-item-material-master.md) | Enterprise & Master Data | Built (partly) |
+| 05 | [Customer & Supplier Master](05-customer-supplier-master.md) | Enterprise & Master Data | Built (partly) |
+| 06 | [Document & Numbering Setup](06-document-numbering.md) | Enterprise & Master Data | Built (partly) |
+| 07 | [Workflow & Approval Setup](07-workflow-approval-setup.md) | Enterprise & Master Data | Built (partly) |
